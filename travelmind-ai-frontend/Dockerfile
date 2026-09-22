@@ -2,7 +2,8 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY . .
-RUN npm ci
+# 依赖走 npmmirror，并用缓存卷加速重复构建
+RUN --mount=type=cache,target=/root/.npm npm ci --registry=https://registry.npmmirror.com
 RUN npm run build
 
 # 运行阶段 - 使用 nginx 托管静态文件
