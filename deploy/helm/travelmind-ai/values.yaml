@@ -1,0 +1,73 @@
+image:
+  repository: your-registry/travelmind-ai
+  tag: "0.0.1"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# 由外部 Secret 管理系统创建，至少包含 MYSQL_PASSWORD、RABBITMQ_PASSWORD、
+# PGVECTOR_PASSWORD、DASHSCOPE_API_KEY；Chart 不生成或提交明文凭证。
+existingSecret: travelmind-ai-secrets
+
+config:
+  mysqlHost: mysql-primary.database.svc.cluster.local
+  mysqlDatabase: travelmind_ai
+  mysqlUser: agent
+  redisHost: redis-master.cache.svc.cluster.local
+  rabbitmqHost: rabbitmq.messaging.svc.cluster.local
+  rabbitmqUsername: agent
+  elasticsearchUris: http://elasticsearch.search.svc.cluster.local:9200
+  pgvectorJdbcUrl: jdbc:postgresql://pgvector-primary.database.svc.cluster.local:5432/travel_knowledge
+  pgvectorUsername: travel
+  otelEndpoint: http://otel-collector.observability.svc.cluster.local:4318/v1/traces
+  traceSamplingProbability: "0.10"
+
+api:
+  replicas: 2
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+agentWorker:
+  replicas: 2
+  resources:
+    requests: {cpu: 500m, memory: 768Mi}
+    limits: {cpu: "2", memory: 2Gi}
+
+knowledgeWorker:
+  replicas: 1
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 3Gi}
+
+autoscaling:
+  enabled: true
+  api:
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 65
+  agentWorker:
+    minReplicas: 2
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+
+# 集群安装 KEDA 后可改为按 RabbitMQ agent.plan.q 队列深度扩容 Agent Worker。
+keda:
+  enabled: false
+  queueName: agent.plan.q
+  queueLength: "5"
+  rabbitmqHostSecretKey: RABBITMQ_AMQP_URI
+
+ingress:
+  enabled: false
+  className: nginx
+  host: agent.example.com
+  tlsSecretName: agent-tls
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

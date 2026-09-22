@@ -1,0 +1,7 @@
+apiVersion: v2
+name: travelmind-ai
+description: Highly available Travel Agent API, Agent Worker and Knowledge Worker
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+kubeVersion: ">=1.27.0-0"

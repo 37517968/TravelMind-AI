@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+.m2
+.npm-cache
+AppData
+docs
+target
+travelmind-ai-frontend
+travelmind-image-search-mcp-server
+*.log
+.env

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-knowledge-worker
+  labels: {{- include "travelmind-ai.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.knowledgeWorker.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: knowledge-worker}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: knowledge-worker}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      terminationGracePeriodSeconds: 90
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+      containers:
+        - name: knowledge-worker
+          {{ include "travelmind-ai.pod" . | nindent 10 }}
+          env:
+            - {name: APP_RUNTIME_ROLE, value: knowledge-worker}
+            - {name: APP_AGENT_WORKER_ENABLED, value: "false"}
+            - {name: APP_KNOWLEDGE_WORKER_ENABLED, value: "true"}
+            - {name: MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE, value: "readinessState,db,rabbit,elasticsearch"}
+          resources: {{- toYaml .Values.knowledgeWorker.resources | nindent 12 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}

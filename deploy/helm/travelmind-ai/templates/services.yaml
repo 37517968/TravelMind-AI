@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-api
+  labels: {{- include "travelmind-ai.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}
+  ports:
+    - {name: http, port: 8123, targetPort: http}
+    - {name: management, port: 9090, targetPort: management}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-agent-worker-metrics
+  labels: {{- include "travelmind-ai.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: agent-worker}
+  ports:
+    - {name: management, port: 9090, targetPort: management}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-knowledge-worker-metrics
+  labels: {{- include "travelmind-ai.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: knowledge-worker}
+  ports:
+    - {name: management, port: 9090, targetPort: management}

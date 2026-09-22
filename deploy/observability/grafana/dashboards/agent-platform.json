@@ -1,0 +1,36 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {"type":"row","title":"Performance / 性能","gridPos":{"h":1,"w":24,"x":0,"y":0},"id":1},
+    {"type":"timeseries","title":"HTTP QPS","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (runtime_role) (rate(http_server_requests_seconds_count[5m]))","legendFormat":"{{runtime_role}}"}],"gridPos":{"h":7,"w":6,"x":0,"y":1},"id":2},
+    {"type":"timeseries","title":"HTTP P95","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, runtime_role) (rate(http_server_requests_seconds_bucket[5m])))","legendFormat":"{{runtime_role}}"}],"gridPos":{"h":7,"w":6,"x":6,"y":1},"id":3},
+    {"type":"timeseries","title":"Agent Node P95","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, node) (rate(agent_node_duration_seconds_bucket[10m])))","legendFormat":"{{node}}"}],"gridPos":{"h":7,"w":6,"x":12,"y":1},"id":4},
+    {"type":"timeseries","title":"Model First Token P95","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(agent_model_first_token_duration_seconds_bucket[10m])))","legendFormat":"P95"}],"gridPos":{"h":7,"w":6,"x":18,"y":1},"id":17},
+
+    {"type":"row","title":"Reliability / 可靠性","gridPos":{"h":1,"w":24,"x":0,"y":8},"id":5},
+    {"type":"timeseries","title":"Task State","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max by (status) (agent_tasks)","legendFormat":"{{status}}"}],"gridPos":{"h":7,"w":8,"x":0,"y":9},"id":6},
+    {"type":"timeseries","title":"Task Outcomes","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (outcome) (rate(agent_task_completed_total[10m]))","legendFormat":"{{outcome}}"}],"gridPos":{"h":7,"w":8,"x":8,"y":9},"id":7},
+    {"type":"timeseries","title":"Outbox & RabbitMQ Backlog","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(agent_outbox_backlog)","legendFormat":"outbox"},{"expr":"sum by (queue) (rabbitmq_queue_messages_ready)","legendFormat":"{{queue}}"}],"gridPos":{"h":7,"w":8,"x":16,"y":9},"id":8},
+
+    {"type":"row","title":"Quality / 质量","gridPos":{"h":1,"w":24,"x":0,"y":16},"id":9},
+    {"type":"timeseries","title":"RAG Search Outcome","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (outcome, degraded) (rate(rag_search_total[10m]))","legendFormat":"{{outcome}} degraded={{degraded}}"}],"gridPos":{"h":7,"w":8,"x":0,"y":17},"id":10},
+    {"type":"timeseries","title":"Tool Outcome / Error Code","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (tool, outcome, error_code) (rate(tool_calls_total[10m]))","legendFormat":"{{tool}} {{outcome}} {{error_code}}"}],"gridPos":{"h":7,"w":8,"x":8,"y":17},"id":11},
+    {"type":"stat","title":"Knowledge Index Failures","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(knowledge_index_failures)"}],"gridPos":{"h":7,"w":8,"x":16,"y":17},"id":12},
+
+    {"type":"row","title":"AI Usage & Cost Proxy / 用量与成本代理","gridPos":{"h":1,"w":24,"x":0,"y":24},"id":13},
+    {"type":"stat","title":"Model Tokens (24h)","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(agent_model_tokens_24h)"}],"gridPos":{"h":6,"w":8,"x":0,"y":25},"id":14},
+    {"type":"stat","title":"Model Calls (24h)","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(agent_model_calls_24h)"}],"gridPos":{"h":6,"w":8,"x":8,"y":25},"id":15},
+    {"type":"timeseries","title":"Estimated Tool Cost Rate","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"currencyUSD"}},"targets":[{"expr":"sum by (tool) (rate(tool_estimated_cost_total[1h])) * 3600","legendFormat":"{{tool}} / hour"}],"gridPos":{"h":6,"w":8,"x":16,"y":25},"id":16}
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["agent", "rag", "tool", "reliability"],
+  "templating": {"list": []},
+  "time": {"from":"now-6h","to":"now"},
+  "timezone": "browser",
+  "title": "Travel Agent Platform",
+  "uid": "travel-agent-platform",
+  "version": 1
+}

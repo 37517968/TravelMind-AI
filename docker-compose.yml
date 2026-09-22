@@ -1,0 +1,236 @@
+x-app-environment: &app-environment
+  SPRING_PROFILES_ACTIVE: prod
+  MYSQL_HOST: mysql
+  MYSQL_DATABASE: travelmind_ai
+  MYSQL_USER: root
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  REDIS_HOST: redis
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-agent}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+  ELASTICSEARCH_URIS: http://elasticsearch:9200
+  PGVECTOR_JDBC_URL: jdbc:postgresql://pgvector:5432/travel_knowledge
+  PGVECTOR_USERNAME: ${PGVECTOR_USERNAME:-travel}
+  PGVECTOR_PASSWORD: ${PGVECTOR_PASSWORD}
+  DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+  SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+  AMAP_API_KEY: ${AMAP_API_KEY:-}
+  QWEATHER_API_KEY: ${QWEATHER_API_KEY:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+  OTEL_TRACES_SAMPLER_PROBABILITY: ${OTEL_TRACES_SAMPLER_PROBABILITY:-0.0}
+  MANAGEMENT_PORT: 9090
+  TRAVEL_SOLVER_Z3_ENABLED: ${TRAVEL_SOLVER_Z3_ENABLED:-true}
+  TRAVEL_SOLVER_Z3_BASE_URL: http://solver-service:8091
+
+x-app-common: &app-common
+  build: .
+  restart: unless-stopped
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    elasticsearch:
+      condition: service_healthy
+    pgvector:
+      condition: service_healthy
+  expose: ["8123", "9090"]
+  extra_hosts: ["host.docker.internal:host-gateway"]
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:9090/actuator/health/readiness | grep -q UP"]
+    interval: 15s
+    timeout: 5s
+    retries: 10
+    start_period: 75s
+  stop_grace_period: 90s
+
+services:
+  solver-service:
+    build: ./solver-service
+    restart: unless-stopped
+    expose: ["8091"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      MYSQL_DATABASE: travelmind_ai
+    volumes: ["mysql_data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-agent}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./deploy/observability/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
+    ports: ["15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.5
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    volumes: ["elasticsearch_data:/usr/share/elasticsearch/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+
+  pgvector:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: travel_knowledge
+      POSTGRES_USER: ${PGVECTOR_USERNAME:-travel}
+      POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:?请在 .env 中设置 PGVECTOR_PASSWORD}
+    volumes: ["pgvector_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  agent-api:
+    <<: *app-common
+    environment:
+      <<: *app-environment
+      APP_RUNTIME_ROLE: api
+      APP_AGENT_WORKER_ENABLED: "false"
+      APP_KNOWLEDGE_WORKER_ENABLED: "false"
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,redis
+
+  agent-worker:
+    <<: *app-common
+    environment:
+      <<: *app-environment
+      APP_RUNTIME_ROLE: agent-worker
+      APP_AGENT_WORKER_ENABLED: "true"
+      APP_KNOWLEDGE_WORKER_ENABLED: "false"
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,redis,rabbit
+
+  knowledge-worker:
+    <<: *app-common
+    environment:
+      <<: *app-environment
+      APP_RUNTIME_ROLE: knowledge-worker
+      APP_AGENT_WORKER_ENABLED: "false"
+      APP_KNOWLEDGE_WORKER_ENABLED: "true"
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,rabbit,elasticsearch
+
+  frontend:
+    build: ./travelmind-ai-frontend
+    restart: unless-stopped
+    ports: ["80:80"]
+    depends_on:
+      agent-api:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports: ["9091:9090"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes: ["./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
+    ports: ["9093:9093"]
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  tempo:
+    image: grafana/tempo:3.0.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./deploy/observability/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.118.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes: ["./deploy/observability/otel-collector.yml:/etc/otelcol/config.yml:ro"]
+    depends_on: [tempo]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus, tempo]
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  elasticsearch_data:
+  pgvector_data:
+  prometheus_data:
+  tempo_data:
+  grafana_data:

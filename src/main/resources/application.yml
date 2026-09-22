@@ -1,0 +1,263 @@
+spring:
+  application:
+    name: travelmind-ai
+  profiles:
+    active: local
+  # MySQL 数据源配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/travelmind_ai?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 接管由旧 create_tables.sql 创建、但尚无 Flyway 历史表的数据库。
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+    clean-disabled: true
+  # Redis 配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:  # 如果有密码则填写
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 1
+        concurrency: 1
+        max-concurrency: 2
+        observation-enabled: true
+        shutdown-timeout: 60s
+    template:
+      observation-enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 60s
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 3s
+    socket-timeout: 10s
+  ai:
+    # 默认不把 Prompt、Completion 和检索正文写入 Observation/Trace。
+    chat:
+      observations:
+        include-prompt: false
+        include-completion: false
+    vectorstore:
+      observations:
+        include-query-response: false
+    dashscope:
+      # 需要替换为你自己的 key
+      api-key: ${DASHSCOPE_API_KEY:sk-your-api-key}
+      chat:
+        options:
+          model: qwen-plus-2025-07-28
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: gemma3:1b
+    # MCP 服务配置
+    mcp:
+      client:
+        # SSE 方式连接的 MCP 服务（如天气服务）
+        sse:
+          connections:
+            # 天气服务 MCP（示例，需要部署对应服务）
+            # weather-service:
+            #   url: http://localhost:8127
+        # STDIO 方式连接的 MCP 服务
+        stdio:
+          servers-configuration: classpath:mcp-servers.json
+# 临时注释掉，便于大家开发调试和部署（实际需要启动 PgVector 数据库）
+#    vectorstore:
+#      pgvector:
+#        index-type: HNSW
+#        dimensions: 1536
+#        distance-type: COSINE_DISTANCE
+#        max-document-batch-size: 10000
+
+server:
+  port: 8123
+  shutdown: graceful
+  servlet:
+    context-path: /api
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      # 某个可选依赖未装配时不让应用因健康组成员校验而启动失败；
+      # 各部署角色再通过环境变量收紧 readiness 的关键依赖集合。
+      validate-group-membership: false
+      probes:
+        enabled: true
+        add-additional-paths: true
+      show-details: when_authorized
+      group:
+        readiness:
+          include: readinessState,db,redis
+  health:
+    defaults:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      runtime_role: ${app.runtime.role:all}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        agent.task.duration: true
+        agent.node.duration: true
+        agent.model.first.token.duration: true
+        rag.search.duration: true
+        tool.duration: true
+  tracing:
+    sampling:
+      probability: ${OTEL_TRACES_SAMPLER_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    # 开启驼峰命名转换
+    map-underscore-to-camel-case: true
+    # 日志输出（开发环境可开启）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      # 逻辑删除字段
+      logic-delete-field: isDelete
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      # 主键策略
+      id-type: auto
+  # Mapper XML 文件位置（如果有的话）
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# springdoc-openapi config
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.travelmind.aiagent.controller
+
+# knife4j config
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+# 第三方 API 配置
+# SearchAPI 网页搜索
+search-api:
+  api-key: ${SEARCH_API_KEY:your-search-api-key}
+
+# 高德地图 API
+amap:
+  api-key: ${AMAP_API_KEY:your-amap-api-key}
+
+# 和风天气 API
+qweather:
+  api-key: ${QWEATHER_API_KEY:your-qweather-api-key}
+
+# 修改日志级别，查看 Spring AI 更多调用细节
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-},spanId=%X{spanId:-},requestId=%X{requestId:-}]"
+  level:
+    org.springframework.ai: DEBUG
+    com.travelmind.aiagent.mapper: DEBUG
+
+# 文件上传下载配置
+file:
+  upload:
+    max-size: 10MB
+  download:
+    base-path: /api/file/download
+
+agent:
+  memory:
+    redis:
+      max-messages: 50
+      ttl: 30d
+  task:
+    outbox-publish-delay-ms: 1000
+    outbox-batch-size: 50
+    max-consumer-attempts: 3
+    sse-timeout-ms: 180000
+    stream-retention: 1000
+    worker-lease-seconds: 300
+    recovery-scan-delay-ms: 30000
+
+app:
+  runtime:
+    # local 默认保持单体开发体验；部署时由 API/Agent Worker/Knowledge Worker 分别覆盖。
+    role: all
+    agent-worker-enabled: true
+    knowledge-worker-enabled: true
+
+travel:
+  solver:
+    z3:
+      enabled: ${TRAVEL_SOLVER_Z3_ENABLED:false}
+      base-url: ${TRAVEL_SOLVER_Z3_BASE_URL:http://localhost:8091}
+  tools:
+    high-risk-enabled: false
+    executor:
+      core-size: 8
+      max-size: 16
+      queue-capacity: 100
+  governance:
+    tool-max-concurrency: 16
+    model-max-concurrency: 4
+    user-tool-qps: 5
+  mcp:
+    remote:
+      enabled: false
+      servers: {}
+  knowledge:
+    vectorstore:
+      # 本地默认不要求 PGVector；prod profile 覆盖为 pgvector。
+      type: disabled
+    elasticsearch:
+      enabled: true
+      index-alias: travel-knowledge
+      initial-index: travel-knowledge-v1
+    vectorstore:
+      # 本地可用 SimpleVectorStore；生产 profile 覆盖为 pgvector。
+      type: simple
+    hybrid:
+      rrf-k: 60
+      lexical-candidates: 20
+      vector-candidates: 20
+      cache-ttl: 5m
+    chunk:
+      max-chars: 1200
+      min-chars: 80

@@ -1,0 +1,9 @@
+route:
+  receiver: local-null
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  # 本地环境只在 Alertmanager UI 展示。生产应替换为企业 Webhook、邮件或 PagerDuty。
+  - name: local-null

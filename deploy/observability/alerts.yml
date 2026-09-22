@@ -1,0 +1,79 @@
+groups:
+  - name: agent-platform
+    rules:
+      - alert: AgentApiHighErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Agent API 5xx 比例超过 5%"
+          runbook: "检查 Grafana HTTP 面板和对应 traceId，确认数据库、Redis 与上游模型状态。"
+      - alert: AgentTaskP95TooHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(agent_task_duration_seconds_bucket[10m]))) > 180
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Agent 任务 P95 超过 180 秒"
+          runbook: "按 agent.node.duration 定位慢节点，再检查模型配额、Tool 超时和 MQ 积压。"
+      - alert: AgentTaskFailureRateHigh
+        expr: sum(rate(agent_task_completed_total{outcome=~"FAILED|DLQ|INFRASTRUCTURE_ERROR"}[10m])) / clamp_min(sum(rate(agent_task_completed_total[10m])), 0.001) > 0.10
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "Agent 任务失败率超过 10%"
+          runbook: "查询 DLQ、任务 error_code 与 OpenTelemetry Trace；禁止直接清空队列。"
+      - alert: ModelFirstTokenP95TooHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(agent_model_first_token_duration_seconds_bucket[10m]))) > 10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "模型首 Token P95 超过 10 秒"
+          runbook: "检查模型配额、网络、并发限流和上下文大小，并关联 ITINERARY_GENERATION Span。"
+      - alert: AgentOutboxBacklog
+        expr: max(agent_outbox_backlog) > 100
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Transactional Outbox 积压超过 100"
+          runbook: "检查 Agent Worker、RabbitMQ Publisher Confirm 和 outbox_event.last_error。"
+      - alert: RabbitMqQueueBacklogGrowing
+        expr: delta(rabbitmq_queue_messages_ready[10m]) > 100
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "RabbitMQ 待消费消息持续增长"
+          runbook: "检查对应 queue 标签，确认 Worker 副本、模型配额和下游依赖，再决定扩容。"
+      - alert: RabbitMqDeadLetterPresent
+        expr: rabbitmq_queue_messages_ready{queue=~".*dlq"} > 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "RabbitMQ 死信队列出现消息"
+          runbook: "先保留消息并定位 error_code，修复根因后通过管理接口进行有限批量重放。"
+      - alert: ToolFailureRateHigh
+        expr: sum(rate(tool_calls_total{outcome="FAILED"}[10m])) / clamp_min(sum(rate(tool_calls_total[10m])), 0.001) > 0.20
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Tool/MCP 失败率超过 20%"
+          runbook: "按 tool、error_code 标签定位；确认 Sentinel 熔断、上游超时和 stale fallback。"
+      - alert: RagDegradedRateHigh
+        expr: sum(rate(rag_search_total{degraded="true"}[10m])) / clamp_min(sum(rate(rag_search_total[10m])), 0.001) > 0.20
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "RAG 降级检索比例超过 20%"
+          runbook: "分别检查 Elasticsearch、PGVector 可用性及索引版本对账。"
+      - alert: KnowledgeIndexFailure
+        expr: max(knowledge_index_failures) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "知识索引存在失败状态"
+          runbook: "调用对账接口查看 sourceId/version，检查 Knowledge DLQ 后再补偿。"
+      - alert: RedisEvictionsDetected
+        expr: increase(redis_evicted_keys_total[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis 发生键淘汰"
+          runbook: "检查 maxmemory、缓存 TTL 与 Stream 保留策略；确认未影响 SSE 断线续传窗口。"

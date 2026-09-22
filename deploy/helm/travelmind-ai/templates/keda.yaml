@@ -1,0 +1,31 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-rabbitmq
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: {{ .Values.existingSecret }}
+      key: {{ .Values.keda.rabbitmqHostSecretKey }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "travelmind-ai.fullname" . }}-agent-worker
+spec:
+  scaleTargetRef:
+    name: {{ include "travelmind-ai.fullname" . }}-agent-worker
+  minReplicaCount: {{ .Values.autoscaling.agentWorker.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.agentWorker.maxReplicas }}
+  cooldownPeriod: 600
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: {{ .Values.keda.queueName }}
+        mode: QueueLength
+        value: {{ .Values.keda.queueLength | quote }}
+      authenticationRef:
+        name: {{ include "travelmind-ai.fullname" . }}-rabbitmq
+{{- end }}
