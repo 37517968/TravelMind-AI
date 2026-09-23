@@ -120,7 +120,10 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
     private NodeExecutionResult executeNodeInternal(AgentTask initialTask, WorkflowState state, NodeExecutor node) {
         AgentWorkflowCheckpoint previous = checkpointStore.latest(initialTask.getId(), node.nodeId());
         if (previous != null && "SUCCEEDED".equals(previous.getNodeStatus())) {
-            return readResult(previous.getOutputSnapshot());
+            NodeExecutionResult replayed = readResult(previous.getOutputSnapshot());
+            // 回放也要写回状态：开启新一轮规划会清空旧行程数据，此后只能靠节点自身输出重建。
+            state.merge(replayed.getData());
+            return replayed;
         }
         ensureTaskMayContinue(initialTask.getId(), state);
         enforceBudget(initialTask.getId(), state);
