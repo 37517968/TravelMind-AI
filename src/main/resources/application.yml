@@ -250,9 +250,6 @@ travel:
       enabled: true
       index-alias: travel-knowledge
       initial-index: travel-knowledge-v1
-    vectorstore:
-      # 本地可用 SimpleVectorStore；生产 profile 覆盖为 pgvector。
-      type: simple
     hybrid:
       rrf-k: 60
       lexical-candidates: 20
