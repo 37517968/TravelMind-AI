@@ -2,6 +2,7 @@ package com.travelmind.aiagent.planning.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmind.aiagent.planning.model.TravelCandidate;
+import com.travelmind.aiagent.task.event.AgentProgressEventStore;
 import com.travelmind.aiagent.planning.model.TravelCandidateSet;
 import com.travelmind.aiagent.planning.model.TravelConstraintSpec;
 import com.travelmind.aiagent.tool.model.ToolResult;
@@ -21,12 +22,19 @@ import java.util.UUID;
  */
 @Component
 public class TravelCandidateCollector {
+    private static final String RETRIEVAL_NODE = "CANDIDATE_RETRIEVAL";
+    private static final Map<String, String> TOOL_LABELS = Map.of(
+            "searchHotels", "住宿", "searchAttractions", "景点", "searchRestaurants", "餐厅");
+
     private final ObjectProvider<TravelToolFacade> tools;
     private final ObjectMapper objectMapper;
+    private final AgentProgressEventStore eventStore;
 
-    public TravelCandidateCollector(ObjectProvider<TravelToolFacade> tools, ObjectMapper objectMapper) {
+    public TravelCandidateCollector(ObjectProvider<TravelToolFacade> tools, ObjectMapper objectMapper,
+                                    AgentProgressEventStore eventStore) {
         this.tools = tools;
         this.objectMapper = objectMapper;
+        this.eventStore = eventStore;
     }
 
     public TravelCandidateSet collect(Long taskId, String userId, TravelConstraintSpec spec) {
@@ -35,6 +43,7 @@ public class TravelCandidateCollector {
 
         Instant now = Instant.now();
         TravelToolFacade facade = tools.getIfAvailable();
+        if (spec.destination().isBlank()) return new TravelCandidateSet(List.of(), List.of(), List.of(), List.of(), now);
         ToolResult hotels = invoke(facade, "searchHotels", Map.of("city", spec.destination(), "keyword", ""), taskId, userId);
         ToolResult attractions = invoke(facade, "searchAttractions",
                 Map.of("city", spec.destination(), "keyword", String.join(" ", spec.requiredAttractionTags())), taskId, userId);
@@ -63,9 +72,25 @@ public class TravelCandidateCollector {
         catch (IllegalArgumentException ignored) { return null; }
     }
 
+    /** 工具调用过程通过进度事件暴露给前端，用小字展示"正在查什么、查没查到"。 */
     private ToolResult invoke(TravelToolFacade facade, String name, Map<String, Object> args, Long taskId, String userId) {
-        if (facade == null) return unavailable(name);
-        return facade.invokeTyped(name, args, "CANDIDATE_RETRIEVAL", String.valueOf(taskId), userId);
+        String label = TOOL_LABELS.getOrDefault(name, name);
+        if (facade == null) {
+            progress(taskId, name, "DEGRADED", label + "查询能力未开启，改用参考估算");
+            return unavailable(name);
+        }
+        progress(taskId, name, "RUNNING", "正在查询" + label + "实时信息…");
+        ToolResult result = facade.invokeTyped(name, args, RETRIEVAL_NODE, String.valueOf(taskId), userId);
+        progress(taskId, name, result.success() ? "SUCCEEDED" : "DEGRADED", result.success()
+                ? label + "信息查询完成"
+                : label + "暂时查不到，已改用参考估算");
+        return result;
+    }
+
+    private void progress(Long taskId, String toolName, String status, String message) {
+        if (eventStore == null || taskId == null) return;
+        eventStore.publish(taskId, "TOOL", RETRIEVAL_NODE, status, message, 40,
+                Map.of("key", "tool:" + toolName, "tool", toolName));
     }
 
     private List<TravelCandidate> toolCandidates(ToolResult result, TravelCandidate.CandidateType type,

@@ -33,10 +33,7 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
         chooseHotel(spec, candidates, selected, core, gaps);
         chooseTagged(spec.requiredAttractionTags(), candidates.attractions(), "required_attraction_tags", selected, core, gaps);
         chooseTagged(spec.requiredCuisineTags(), candidates.restaurants(), "required_cuisine_tags", selected, core, gaps);
-        if (spec.requiredAttractionTags().isEmpty()) {
-            candidates.attractions().stream().filter(this::usable).sorted(byCost())
-                    .limit(Math.max(1, spec.days())).forEach(selected::add);
-        }
+        chooseAttractions(spec, candidates, selected, gaps);
 
         long total = totalCost(spec, selected);
         if (spec.maxBudgetCents() != null && total > spec.maxBudgetCents()) core.add("max_budget");
@@ -72,6 +69,22 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
         if (set.hotels().isEmpty()) gaps.add("hotel_availability");
         else if (feasible.isEmpty()) core.add("hotel_availability");
         else chooseWithFallback("hotel_availability", feasible, selected, gaps);
+    }
+
+    /** 未指定必玩类型时按天数挑最便宜的景点；工具失败导致候选全部未确认时，仍降级选材并记录缺口。 */
+    private void chooseAttractions(TravelConstraintSpec spec, TravelCandidateSet set, List<TravelCandidate> selected,
+                                   Set<String> gaps) {
+        if (!spec.requiredAttractionTags().isEmpty()) return;
+        List<TravelCandidate> picks = set.attractions().stream().sorted(byCost()).limit(Math.max(1, spec.days())).toList();
+        if (picks.isEmpty()) {
+            gaps.add("attraction_availability");
+            return;
+        }
+        if (picks.stream().anyMatch(this::usable)) selected.addAll(picks.stream().filter(this::usable).toList());
+        else {
+            gaps.add("attraction_availability");
+            selected.addAll(picks);
+        }
     }
 
     /**

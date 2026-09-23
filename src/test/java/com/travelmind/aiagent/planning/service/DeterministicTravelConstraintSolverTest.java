@@ -79,6 +79,23 @@ class DeterministicTravelConstraintSolverTest {
                 .contains("hotel_availability", "required_attraction_tags:博物馆");
     }
 
+    @Test
+    void dayTripWithFailedToolsShouldStillSelectEstimatesAndReportGap() {
+        TravelConstraintSpec dayTrip = new TravelConstraintSpec("", "杭州", null, 1, 1, 300_000L, "CNY", List.of(),
+                List.of(), List.of(), null, Map.of(), Map.of(), 0);
+        Instant now = Instant.now();
+        TravelCandidateSet degraded = new TravelCandidateSet(List.of(),
+                List.of(unavailable(candidate("hotel", TravelCandidate.CandidateType.HOTEL, 60_000, List.of()))),
+                List.of(unavailable(candidate("west-lake", TravelCandidate.CandidateType.ATTRACTION, 5_000,
+                        List.of("通用景点")))), List.of(), now);
+
+        TravelSolverResult result = solver.solve(dayTrip, degraded);
+
+        assertThat(result.status()).isEqualTo(TravelSolverResult.SolverStatus.SAT);
+        assertThat(result.selected()).extracting(TravelCandidate::id).containsExactly("west-lake");
+        assertThat(String.valueOf(result.diagnostics().get("dataGaps"))).contains("attraction_availability");
+    }
+
     private TravelCandidate unavailable(TravelCandidate item) {
         return new TravelCandidate(item.id(), item.type(), item.name(), item.city(), item.unitCostCents(),
                 item.durationMinutes(), item.capacity(), item.tags(), false, item.observedAt(), item.expiresAt(),

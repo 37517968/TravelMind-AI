@@ -34,6 +34,22 @@ public class TravelPlanningGraphFactory {
     public static final String FRESHNESS = "FRESHNESS_RECHECK";
     public static final String PERSIST = "PERSISTING";
 
+    /** 面向用户的节点中文名，避免把内部节点 ID 直接暴露到聊天界面。 */
+    private static final Map<String, String> LABELS = Map.ofEntries(
+            Map.entry(INTENT, "判断你的意图"), Map.entry(CHAT_REPLY, "组织回复"),
+            Map.entry(EXTRACT, "理解旅行要求"), Map.entry(CHECK, "核对信息是否齐全"),
+            Map.entry(CONTEXT, "查阅目的地资料"), Map.entry(CANDIDATES, "查询可订的住宿景点"),
+            Map.entry(SOLVE, "编排预算与行程"), Map.entry(RELAX, "给出调整建议"),
+            Map.entry(GENERATE, "生成行程方案"), Map.entry(VALIDATE, "检查方案质量"),
+            Map.entry(FRESHNESS, "确认信息时效"), Map.entry(PERSIST, "保存方案"));
+
+    /** 逻辑或物理节点 ID 均可取标签，未知节点原样返回。 */
+    public static String label(String nodeId) {
+        if (nodeId == null) return "";
+        return LABELS.entrySet().stream().filter(entry -> nodeId.startsWith(entry.getKey()))
+                .map(Map.Entry::getValue).findFirst().orElse(nodeId);
+    }
+
     public CompiledGraph compile(Function<String, Map<String, Object>> nodeRunner) {
         try {
             OverAllState graphStateTemplate = new OverAllState();

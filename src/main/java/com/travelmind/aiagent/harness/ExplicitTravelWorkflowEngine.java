@@ -136,7 +136,8 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
                     state.getRequest(), state.snapshot());
             long started = System.nanoTime();
             eventStore.publish(initialTask.getId(), "NODE", node.nodeId(), "RUNNING",
-                    "执行节点 " + node.nodeId(), progress(node.nodeId()), Map.of("attempt", attempt));
+                    "正在" + TravelPlanningGraphFactory.label(node.nodeId()) + "…", progress(node.nodeId()),
+                    Map.of("attempt", attempt, "key", node.nodeId()));
             Future<NodeExecutionResult> invocation = null;
             try {
                 invocation = agentNodeInvocationExecutor.submit(() -> node.execute(state));
@@ -152,7 +153,8 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
                 taskMapper.addUsage(initialTask.getId(), result.getModelCalls(), result.getEstimatedTokens());
                 checkpointStore.succeed(checkpoint, result, state.snapshot(), duration);
                 eventStore.publish(initialTask.getId(), "NODE", node.nodeId(), "SUCCEEDED",
-                        "节点完成 " + node.nodeId(), progress(node.nodeId()), Map.of("warnings", result.getWarnings()));
+                        TravelPlanningGraphFactory.label(node.nodeId()) + "完成", progress(node.nodeId()),
+                        Map.of("warnings", result.getWarnings(), "key", node.nodeId()));
                 return result;
             } catch (TimeoutException timeout) {
                 if (invocation != null) invocation.cancel(true);

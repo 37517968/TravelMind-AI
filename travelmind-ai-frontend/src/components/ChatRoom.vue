@@ -11,10 +11,20 @@
             <AiAvatarFallback :type="aiType" />
           </div>
           <div class="message-bubble">
-            <div class="message-content">
-              {{ msg.content }}
-              <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
+            <!-- 模型思考与工具调用过程用小字灰度展示，不与正式回复混在一起 -->
+            <div v-if="msg.steps && msg.steps.length" class="message-steps">
+              <div
+                v-for="step in msg.steps"
+                :key="step.key"
+                class="step-line"
+                :class="step.state"
+              >
+                <span class="step-icon">{{ stepIcon(step.state) }}</span>
+                <span class="step-text">{{ step.text }}</span>
+              </div>
             </div>
+            <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <span v-if="showTyping(index)" class="typing-indicator">▋</span>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
         </div>
@@ -55,6 +65,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps({
   messages: {
@@ -83,6 +94,13 @@ const sendMessage = () => {
   emit('send-message', inputMessage.value)
   inputMessage.value = ''
 }
+
+// 步骤状态图标：running 进行中、ok 完成、warn 降级、error 失败
+const stepIcon = (state) => ({ running: '◌', ok: '✓', warn: '!', error: '×' }[state] || '·')
+
+const showTyping = (index) => (
+  props.connectionStatus === 'connecting' && index === props.messages.length - 1
+)
 
 // 格式化时间
 const formatTime = (timestamp) => {
@@ -219,6 +237,151 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 
+/* 思考/工具调用过程：小字灰度，避免与正式回复抢视觉重点 */
+.message-steps {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a8f99;
+  background-color: rgba(255, 255, 255, 0.55);
+  border-left: 2px solid #d3d7de;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+
+.step-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  word-break: break-all;
+}
+
+.step-line + .step-line {
+  margin-top: 2px;
+}
+
+.step-icon {
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.step-line.warn {
+  color: #b26a00;
+}
+
+.step-line.error {
+  color: #c0392b;
+}
+
+.step-line.running .step-icon {
+  animation: blink 1s infinite;
+}
+
+/* 正式回复按 Markdown 结构化渲染，覆盖上面的 pre-wrap；v-html 内容需要 :deep() 才能命中 */
+.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body :deep(p) {
+  margin: 0 0 8px;
+}
+
+.markdown-body :deep(h3),
+.markdown-body :deep(h4),
+.markdown-body :deep(h5),
+.markdown-body :deep(h6) {
+  margin: 12px 0 6px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.markdown-body :deep(h3) {
+  font-size: 17px;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 2px;
+}
+
+.markdown-body :deep(code) {
+  background-color: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+}
+
+.markdown-body :deep(pre) {
+  background-color: #282c34;
+  color: #e6e6e6;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+
+.markdown-body :deep(pre code) {
+  background: none;
+  color: inherit;
+  padding: 0;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  border-left: 3px solid #b9c2cf;
+  color: #5b6472;
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+.markdown-body :deep(a) {
+  color: #0071e3;
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid #d3d7de;
+  margin: 10px 0;
+}
+
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  font-size: 14px;
+  width: 100%;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid #d3d7de;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background-color: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+}
+
+.markdown-body :deep(.md-table-wrap) {
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+.markdown-body :deep(*:last-child) {
+  margin-bottom: 0;
+}
 .message-time {
   font-size: 12px;
   opacity: 0.7;

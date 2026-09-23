@@ -6,6 +6,7 @@ import com.travelmind.aiagent.planning.model.TravelSolverResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 
@@ -38,15 +39,20 @@ public class Z3TravelConstraintSolver implements TravelConstraintSolver {
         if (!enabled) return fallback.solve(constraints, candidates);
         try {
             TravelSolverResult result = client.post().uri("/solve")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_JSON)
                     .body(Map.of("constraints", constraints, "candidates", candidates,
                             "timeoutMillis", Duration.ofSeconds(3).toMillis()))
                     .retrieve().body(TravelSolverResult.class);
             return result == null ? fallback.solve(constraints, candidates) : result;
         } catch (RuntimeException unavailable) {
+            // 降级到本地求解时必须保留 dataGaps 等诊断，否则上层无法区分“无数据”和“约束冲突”。
             TravelSolverResult local = fallback.solve(constraints, candidates);
+            Map<String, Object> diagnostics = new java.util.LinkedHashMap<>(local.diagnostics());
+            diagnostics.put("solver", "FINITE_DOMAIN_JAVA_FALLBACK");
+            diagnostics.put("z3Error", unavailable.getClass().getSimpleName());
             return new TravelSolverResult(local.status(), local.selected(), local.totalCostCents(),
-                    local.unsatCore(), local.relaxationSuggestions(), local.objectiveScore(),
-                    Map.of("solver", "FINITE_DOMAIN_JAVA_FALLBACK", "z3Error", unavailable.getClass().getSimpleName()));
+                    local.unsatCore(), local.relaxationSuggestions(), local.objectiveScore(), diagnostics);
         }
     }
 }

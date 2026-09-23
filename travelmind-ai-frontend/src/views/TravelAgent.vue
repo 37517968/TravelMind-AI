@@ -100,27 +100,54 @@ const addMessage = (content, isUser, type = '') => {
   })
 }
 
-const appendToken = (content) => {
-  if (!content) return
+// 同一条助手消息同时承载“过程小字”和正式回复，避免聊天区出现空气泡。
+const assistantMessage = () => {
   if (answerMessageIndex < 0) {
-    messages.value.push({ content: '', isUser: false, type: 'ai-answer', time: Date.now() })
+    messages.value.push({ content: '', isUser: false, type: 'ai-answer', time: Date.now(), steps: [] })
     answerMessageIndex = messages.value.length - 1
   }
-  messages.value[answerMessageIndex].content += content
+  const message = messages.value[answerMessageIndex]
+  if (!message.steps) message.steps = []
+  return message
+}
+
+const appendToken = (content) => {
+  if (!content) return
+  assistantMessage().content += content
+}
+
+// 节点与工具进度写入小字步骤区，相同 key 覆盖更新，避免刷屏。
+const appendStep = (event, state) => {
+  const text = event?.message
+  if (!text) return
+  const key = event?.details?.key || `${event?.type}:${event?.nodeId || ''}`
+  const steps = assistantMessage().steps
+  const existing = steps.find(step => step.key === key)
+  if (existing) {
+    existing.text = text
+    existing.state = state
+  } else {
+    steps.push({ key, text, state })
+  }
 }
 
 const readFinalResult = async () => {
   if (!activeTaskId) return
   const { data } = await getAgentTask(activeTaskId)
   const resultJson = data?.task?.resultJson
-  if (answerMessageIndex < 0 && resultJson) {
-    try {
-      const result = JSON.parse(resultJson)
-      if (result.itinerary) addMessage(result.itinerary, false, 'ai-final')
-    } catch {
-      addMessage(resultJson, false, 'ai-final')
-    }
+  if (!resultJson) return
+  const message = answerMessageIndex >= 0 ? messages.value[answerMessageIndex] : null
+  if (message && message.content.trim()) return
+  let text = resultJson
+  try {
+    const result = JSON.parse(resultJson)
+    text = result.itinerary || ''
+  } catch {
+    // 非 JSON 结果按纯文本展示
   }
+  if (!text) return
+  if (message) message.content = text
+  else addMessage(text, false, 'ai-final')
 }
 
 const subscribeTask = (taskId) => {
@@ -132,6 +159,16 @@ const subscribeTask = (taskId) => {
     },
     onProgress(event) {
       const status = event?.status
+      // 节点与工具调用只进小字区，不打断正式回复的流式输出
+      if (event?.type === 'NODE' || event?.type === 'TOOL') {
+        appendStep(event, status === 'SUCCEEDED' ? 'ok' : status === 'RUNNING' ? 'running' : 'warn')
+        const warnings = Array.isArray(event?.details?.warnings) ? event.details.warnings : []
+        warnings.forEach(warning => appendStep({
+          message: warning,
+          details: { key: `${event?.details?.key || event?.nodeId}:warning` }
+        }, 'warn'))
+        return
+      }
       if (status === 'WAITING_USER') {
         waitingForUser = true
         connectionStatus.value = 'waiting'
@@ -144,6 +181,11 @@ const subscribeTask = (taskId) => {
     },
     async onTerminal(status) {
       connectionStatus.value = status === 'SUCCEEDED' ? 'disconnected' : 'error'
+      if (answerMessageIndex >= 0) {
+        messages.value[answerMessageIndex].steps.forEach(step => {
+          if (step.state === 'running') step.state = status === 'FAILED' ? 'error' : 'ok'
+        })
+      }
       if (status === 'SUCCEEDED') await readFinalResult()
       if (status !== 'SUCCEEDED') addMessage(`任务已结束：${status}`, false, 'ai-error')
       activeTaskId = null
