@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import com.zaxxer.hikari.HikariDataSource;
 
@@ -31,9 +32,10 @@ public class PgVectorVectorStoreConfig {
 
     @Bean("travelVectorStore")
     public VectorStore travelVectorStore(@Qualifier("pgVectorJdbcTemplate") JdbcTemplate jdbcTemplate,
-                                         @Qualifier("dashscopeEmbeddingModel") EmbeddingModel dashscopeEmbeddingModel) {
+                                         @Qualifier("dashscopeEmbeddingModel") EmbeddingModel dashscopeEmbeddingModel,
+                                         @Value("${travel.knowledge.embedding.dimensions:1024}") int dimensions) {
         return PgVectorStore.builder(jdbcTemplate, dashscopeEmbeddingModel)
-                .dimensions(1536)                    // Optional: defaults to model dimensions or 1536
+                .dimensions(dimensions)              // 与 embedding 模型输出维度、vector_store 列宽保持一致
                 .distanceType(COSINE_DISTANCE)       // Optional: defaults to COSINE_DISTANCE
                 .indexType(HNSW)                     // Optional: defaults to HNSW
                 .initializeSchema(true)              // Optional: defaults to false

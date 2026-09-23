@@ -248,6 +248,9 @@ travel:
       enabled: false
       servers: {}
   knowledge:
+    embedding:
+      # 向量维度：必须与 embedding 模型输出维度、PG 表 vector_store.embedding 列宽三者一致
+      dimensions: ${TRAVEL_EMBEDDING_DIMENSIONS:1024}
     vectorstore:
       # 本地默认不要求 PGVector；prod profile 覆盖为 pgvector。
       type: disabled

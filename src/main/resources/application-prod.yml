@@ -31,6 +31,10 @@ spring:
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY}
+      # 不指定则 spring-ai-alibaba 默认用 text-embedding-v1，这里显式锁定 v3（默认 1024 维）
+      embedding:
+        options:
+          model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
     # 当前 STDIO MCP 配置包含 Windows 命令，生产环境暂时关闭。
