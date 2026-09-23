@@ -5,7 +5,6 @@ import com.travelmind.aiagent.model.entity.TravelPlan;
 import com.travelmind.aiagent.model.enums.TravelKnowledgeLevel;
 import com.travelmind.aiagent.service.TravelPlanService;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -38,12 +37,19 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class TravelKnowledgeIndexService {
 
     private final EmbeddingModel embeddingModel;
     private final TravelKnowledgeEntityLoader entityLoader;
     private final TravelPlanService travelPlanService;
+
+    public TravelKnowledgeIndexService(@Qualifier("localTravelEmbeddingModel") EmbeddingModel embeddingModel,
+                                       TravelKnowledgeEntityLoader entityLoader,
+                                       TravelPlanService travelPlanService) {
+        this.embeddingModel = embeddingModel;
+        this.entityLoader = entityLoader;
+        this.travelPlanService = travelPlanService;
+    }
 
     @Autowired(required = false)
     @Qualifier("travelVectorStore")

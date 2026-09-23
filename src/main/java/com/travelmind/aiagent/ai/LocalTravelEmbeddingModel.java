@@ -6,7 +6,6 @@ import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.embedding.EmbeddingResponseMetadata;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,9 +16,11 @@ import java.util.Locale;
  * 本地兜底 embedding 模型。
  *
  * 不依赖外部 API，使用稳定的 hash 向量，保证知识库初始化和检索可跑通。
+ * spring-ai-alibaba 的 dashscopeEmbeddingModel 自带 @Primary，这里不能再标，
+ * 否则按 EmbeddingModel 注入会因存在多个 @Primary 直接启动失败；需要本模型的注入点用
+ * {@code @Qualifier("localTravelEmbeddingModel")} 显式指定。
  */
 @Component
-@Primary
 public class LocalTravelEmbeddingModel extends AbstractEmbeddingModel {
 
     private static final int DIMENSIONS = 128;
