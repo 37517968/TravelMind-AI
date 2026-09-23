@@ -20,7 +20,16 @@ docker compose --env-file .env --profile observability up -d
 - Grafana：`http://localhost:3000`；
 - Prometheus：`http://localhost:9091`；
 - Alertmanager：`http://localhost:9093`；
+- RabbitMQ 管理台：`http://localhost:15672`。
 - 应用指标：各运行角色的 `:9090/actuator/prometheus`。
+
+上述管理端口默认只绑定宿主机回环（compose 里的 `${ADMIN_BIND_IP:-127.0.0.1}`），服务器上建议用 SSH 隧道访问：
+
+```bash
+ssh -L 3000:127.0.0.1:3000 -L 9091:127.0.0.1:9091 -L 15672:127.0.0.1:15672 user@server
+```
+
+确需公网访问时在 `.env` 中设置 `ADMIN_BIND_IP=0.0.0.0`，并自行用防火墙或云安全组限制来源 IP。
 
 Compose 中的 Tempo 使用单进程、本地块存储，只适合开发验证。生产应采用对象存储、鉴权/TLS、容量规划和按官方建议部署的高可用形态。
 

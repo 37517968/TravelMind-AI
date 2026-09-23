@@ -92,7 +92,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./deploy/observability/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
-    ports: ["15672:15672"]
+    ports: ["${ADMIN_BIND_IP:-127.0.0.1}:15672:15672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -174,7 +174,7 @@ services:
       - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
-    ports: ["9091:9090"]
+    ports: ["${ADMIN_BIND_IP:-127.0.0.1}:9091:9090"]
 
   alertmanager:
     image: prom/alertmanager:v0.28.0
@@ -182,7 +182,7 @@ services:
     restart: unless-stopped
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
     volumes: ["./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
-    ports: ["9093:9093"]
+    ports: ["${ADMIN_BIND_IP:-127.0.0.1}:9093:9093"]
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.66.0
@@ -222,7 +222,7 @@ services:
       - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
-    ports: ["3000:3000"]
+    ports: ["${ADMIN_BIND_IP:-127.0.0.1}:3000:3000"]
     depends_on: [prometheus, tempo]
 
 volumes:
