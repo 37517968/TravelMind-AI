@@ -2,6 +2,8 @@ package com.travelmind.aiagent.task.config;
 
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,6 +12,14 @@ import static com.travelmind.aiagent.task.messaging.AgentMessagingConstants.*;
 @Configuration
 @EnableRabbit
 public class AgentRabbitConfiguration {
+
+    // Spring Boot 3.4 起自动配置的管理 bean 改为 amqpAdmin()，声明类型是 AmqpAdmin，
+    // 按 RabbitAdmin 注入会找不到候选，这里显式声明具体类型供 DLQ 运维接口使用。
+    @Bean
+    public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
+    }
+
     @Bean
     public TopicExchange agentCommandExchange() {
         return ExchangeBuilder.topicExchange(COMMAND_EXCHANGE).durable(true).build();
