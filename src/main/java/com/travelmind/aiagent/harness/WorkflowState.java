@@ -21,6 +21,12 @@ public class WorkflowState {
         if (values != null) data.putAll(values);
     }
 
+    /** 只保留指定键，其余中间结果全部丢弃；用于开启新一轮旅行规划。 */
+    public synchronized void retainOnly(Map<String, Object> kept) {
+        data.clear();
+        if (kept != null) data.putAll(kept);
+    }
+
     public synchronized Map<String, Object> snapshot() {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("request", new LinkedHashMap<>(request));

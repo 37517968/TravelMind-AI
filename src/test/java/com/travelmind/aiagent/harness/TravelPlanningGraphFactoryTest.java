@@ -27,11 +27,25 @@ class TravelPlanningGraphFactoryTest {
         graph.invoke(Map.of(), RunnableConfig.builder().threadId("sat-case").build());
 
         assertThat(visited).containsExactly(
+                TravelPlanningGraphFactory.INTENT,
                 TravelPlanningGraphFactory.EXTRACT, TravelPlanningGraphFactory.CHECK,
                 TravelPlanningGraphFactory.CONTEXT, TravelPlanningGraphFactory.CANDIDATES,
                 TravelPlanningGraphFactory.SOLVE, TravelPlanningGraphFactory.GENERATE,
                 TravelPlanningGraphFactory.VALIDATE, TravelPlanningGraphFactory.FRESHNESS,
                 TravelPlanningGraphFactory.PERSIST);
+    }
+
+    @Test
+    void chitchatRequestShouldReplyAndStopBeforePlanning() {
+        List<String> visited = new ArrayList<>();
+        var graph = new TravelPlanningGraphFactory().compile(node -> {
+            visited.add(node);
+            return Map.of("route", TravelPlanningGraphFactory.INTENT.equals(node) ? "CHAT" : "CONTINUE");
+        });
+
+        graph.invoke(Map.of(), RunnableConfig.builder().threadId("chitchat-case").build());
+
+        assertThat(visited).containsExactly(TravelPlanningGraphFactory.INTENT, TravelPlanningGraphFactory.CHAT_REPLY);
     }
 
     @Test

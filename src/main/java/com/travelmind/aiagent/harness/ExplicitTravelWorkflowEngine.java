@@ -55,6 +55,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             CompiledGraph graph = graphFactory.compile(logicalNodeId -> {
                 NodeExecutor node = catalog.fixedNode(logicalNodeId, state);
                 NodeExecutionResult result = executeNode(task, state, node);
+                if (TravelPlanningGraphFactory.INTENT.equals(logicalNodeId)) restartForNewPlan(taskId, state, result);
                 if (pauseIfNeeded(taskId, node, result, state)) waiting[0] = true;
                 String route = Objects.toString(result.getData().get("workflowRoute"), "CONTINUE");
                 return Map.of("route", route, "lastNode", logicalNodeId);
@@ -63,8 +64,12 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
                     RunnableConfig.builder().threadId(String.valueOf(taskId)).build());
             if (waiting[0] || graphState.map(value -> "WAITING".equals(value.value("route", ""))).orElse(false)) return;
 
+            boolean chitchat = "CHAT".equals(Objects.toString(state.getData().get("responseType"), ""));
+            String answer = Objects.toString(state.getData().get(chitchat ? "chatReply" : "itinerary"), "");
             Map<String, Object> resultPayload = new LinkedHashMap<>();
-            resultPayload.put("itinerary", state.getData().getOrDefault("itinerary", ""));
+            resultPayload.put("responseType", chitchat ? "CHAT" : "PLAN");
+            // 闲聊回复同样通过既有的 itinerary 字段返回，前端与对外协议无需改动。
+            resultPayload.put("itinerary", answer);
             resultPayload.put("constraintSpec", state.getData().get("constraintSpec"));
             resultPayload.put("solverResult", state.getData().get("solverResult"));
             resultPayload.put("validationResult", state.getData().get("validationResult"));
@@ -73,10 +78,10 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             resultPayload.put("metrics", state.getMetrics());
             String resultJson = objectMapper.writeValueAsString(resultPayload);
             taskMapper.markSucceeded(taskId, resultJson);
-            conversationMemory.appendAssistant(task.getConversationId(),
-                    Objects.toString(state.getData().get("itinerary"), ""));
-            eventStore.publish(taskId, "TASK", null, "SUCCEEDED", "旅行方案生成完成", 100,
-                    Map.of("resultAvailable", true));
+            conversationMemory.appendAssistant(task.getConversationId(), answer);
+            eventStore.publish(taskId, "TASK", null, "SUCCEEDED",
+                    chitchat ? "已回复用户" : "旅行方案生成完成", 100,
+                    Map.of("resultAvailable", true, "responseType", chitchat ? "CHAT" : "PLAN"));
         } catch (StopWorkflowException stopped) {
             log.info("Task {} stopped at a safe point", taskId);
         } catch (Exception raw) {
@@ -178,6 +183,20 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
         return true;
     }
 
+    /**
+     * LLM 判定为开启新一轮规划时，丢弃由旧检查点恢复出来的行程状态，并把请求重置为最新一句诉求，
+     * 使约束抽取不会被上一轮行程污染。
+     */
+    private void restartForNewPlan(Long taskId, WorkflowState state, NodeExecutionResult intentResult) {
+        if (!Boolean.TRUE.equals(intentResult.getData().get("newPlan"))) return;
+        if (TravelIntentRouter.awaitingClarification(state.getRequest())) {
+            TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
+        }
+        state.retainOnly(intentResult.getData());
+        log.info("Task {} restarts travel planning on a new request at supplemental version {}", taskId,
+                state.getRequest().get("_supplementalVersion"));
+    }
+
     private void ensureTaskMayContinue(Long taskId, WorkflowState state) {
         AgentTask latest = taskMapper.selectById(taskId);
         if (Boolean.TRUE.equals(latest.getCancelRequested())) {
@@ -228,6 +247,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
     }
 
     private int progress(String nodeId) {
+        if (nodeId.startsWith(TravelPlanningGraphFactory.INTENT)) return 5;
         if (nodeId.startsWith(TravelPlanningGraphFactory.EXTRACT)) return 8;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CHECK)) return 14;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CONTEXT)) return 25;
@@ -238,6 +258,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
         if (nodeId.startsWith(TravelPlanningGraphFactory.VALIDATE)) return 88;
         if (nodeId.startsWith(TravelPlanningGraphFactory.FRESHNESS)) return 94;
         if (nodeId.startsWith(TravelPlanningGraphFactory.PERSIST)) return 98;
+        if (nodeId.startsWith(TravelPlanningGraphFactory.CHAT_REPLY)) return 95;
         return 50;
     }
 

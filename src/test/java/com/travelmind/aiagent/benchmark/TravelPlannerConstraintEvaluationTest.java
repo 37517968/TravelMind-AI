@@ -37,7 +37,8 @@ class TravelPlannerConstraintEvaluationTest {
     private TravelConstraintSpec spec(Map<String, Object> item) {
         return new TravelConstraintSpec("", String.valueOf(item.get("destination")), null,
                 number(item, "days"), number(item, "travelers"), longNumber(item, "budgetCents"), "CNY",
-                List.of(), List.of(String.valueOf(item.get("requiredTag"))), List.of(), null,
+                List.of(), List.of(String.valueOf(item.get("requiredTag"))), List.of(),
+                longOrNull(item, "hotelMaxNightlyCents"),
                 Map.of(), Map.of(), 0);
     }
 
@@ -58,4 +59,8 @@ class TravelPlannerConstraintEvaluationTest {
 
     private int number(Map<String, Object> item, String key) { return ((Number) item.get(key)).intValue(); }
     private long longNumber(Map<String, Object> item, String key) { return ((Number) item.get(key)).longValue(); }
+
+    private Long longOrNull(Map<String, Object> item, String key) {
+        return item.get(key) instanceof Number number ? number.longValue() : null;
+    }
 }

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -15,18 +16,23 @@ import java.util.Set;
 
 /**
  * 有限域确定性求解器。接口允许后续无侵入替换为 Z3/CP-SAT 服务；当前实现不执行 LLM 生成代码。
+ *
+ * <p>这里严格区分“约束矛盾”和“数据缺口”：只有存在候选却全部违反硬约束才记入 UNSAT core；
+ * 工具不可用或没有返回数据时按估算候选降级规划，并把缺口写入 {@code diagnostics.dataGaps}，
+ * 避免把外部数据源故障误报成“用户的约束不可同时满足”。
  */
 @Component
 public class DeterministicTravelConstraintSolver implements TravelConstraintSolver {
     @Override
     public TravelSolverResult solve(TravelConstraintSpec spec, TravelCandidateSet candidates) {
         Set<String> core = new LinkedHashSet<>();
+        Set<String> gaps = new LinkedHashSet<>();
         List<TravelCandidate> selected = new ArrayList<>();
 
-        chooseTransport(spec, candidates, selected, core);
-        chooseHotel(spec, candidates, selected, core);
-        chooseTagged(spec.requiredAttractionTags(), candidates.attractions(), "required_attraction_tags", selected, core);
-        chooseTagged(spec.requiredCuisineTags(), candidates.restaurants(), "required_cuisine_tags", selected, core);
+        chooseTransport(spec, candidates, selected, core, gaps);
+        chooseHotel(spec, candidates, selected, core, gaps);
+        chooseTagged(spec.requiredAttractionTags(), candidates.attractions(), "required_attraction_tags", selected, core, gaps);
+        chooseTagged(spec.requiredCuisineTags(), candidates.restaurants(), "required_cuisine_tags", selected, core, gaps);
         if (spec.requiredAttractionTags().isEmpty()) {
             candidates.attractions().stream().filter(this::usable).sorted(byCost())
                     .limit(Math.max(1, spec.days())).forEach(selected::add);
@@ -34,46 +40,72 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
 
         long total = totalCost(spec, selected);
         if (spec.maxBudgetCents() != null && total > spec.maxBudgetCents()) core.add("max_budget");
-        if (!core.isEmpty()) return unsat(spec, total, core);
-        double score = Math.max(0D, 100D - (total * 100D / Math.max(1L, spec.maxBudgetCents())));
+        if (!core.isEmpty()) return unsat(spec, total, core, gaps);
+        double score = spec.maxBudgetCents() == null || spec.maxBudgetCents() <= 0 ? 0D
+                : Math.max(0D, 100D - (total * 100D / spec.maxBudgetCents()));
         return new TravelSolverResult(TravelSolverResult.SolverStatus.SAT, selected, total, List.of(), List.of(),
-                score, Map.of("solver", "FINITE_DOMAIN_JAVA", "candidateCount", candidates.all().size()));
+                score, diagnostics(gaps, candidates.all().size()));
     }
 
     private void chooseTransport(TravelConstraintSpec spec, TravelCandidateSet set, List<TravelCandidate> selected,
-                                 Set<String> core) {
-        List<TravelCandidate> available = set.transports().stream().filter(this::usable)
+                                 Set<String> core, Set<String> gaps) {
+        List<TravelCandidate> feasible = set.transports().stream()
                 .filter(item -> item.capacity() <= 0 || item.capacity() >= spec.travelers())
                 .filter(item -> spec.allowedTransportModes().isEmpty() || spec.allowedTransportModes().stream()
                         .anyMatch(mode -> mode.equalsIgnoreCase(String.valueOf(item.attributes().get("mode")))))
                 .sorted(byCost()).toList();
-        if (available.isEmpty() && (!set.transports().isEmpty() || !spec.origin().isBlank())) core.add("transport_availability");
-        else if (!available.isEmpty()) selected.add(available.getFirst());
+        if (set.transports().isEmpty()) {
+            if (!spec.origin().isBlank()) gaps.add("transport_availability");
+            return;
+        }
+        if (feasible.isEmpty()) core.add("transport_availability");
+        else chooseWithFallback("transport_availability", feasible, selected, gaps);
     }
 
     private void chooseHotel(TravelConstraintSpec spec, TravelCandidateSet set, List<TravelCandidate> selected,
-                             Set<String> core) {
+                             Set<String> core, Set<String> gaps) {
         if (spec.days() <= 1) return;
-        List<TravelCandidate> available = set.hotels().stream().filter(this::usable)
+        List<TravelCandidate> feasible = set.hotels().stream()
                 .filter(item -> item.capacity() <= 0 || item.capacity() >= spec.travelers())
                 .filter(item -> spec.hotelMaxNightlyCents() == null || item.unitCostCents() <= spec.hotelMaxNightlyCents())
                 .sorted(byCost()).toList();
-        if (available.isEmpty()) core.add("hotel_availability");
-        else selected.add(available.getFirst());
+        if (set.hotels().isEmpty()) gaps.add("hotel_availability");
+        else if (feasible.isEmpty()) core.add("hotel_availability");
+        else chooseWithFallback("hotel_availability", feasible, selected, gaps);
+    }
+
+    /**
+     * 优先选择有实时观测依据的候选（调用方需按成本升序传入）；只剩未校验估算时降级使用并记录缺口。
+     * 已被同一候选满足的约束不会重复加入方案。
+     */
+    private void chooseWithFallback(String category, List<TravelCandidate> feasible, List<TravelCandidate> selected,
+                                    Set<String> gaps) {
+        TravelCandidate verified = feasible.stream().filter(this::usable).findFirst().orElse(null);
+        if (verified != null) {
+            if (!selected.contains(verified)) selected.add(verified);
+            return;
+        }
+        gaps.add(category);
+        if (feasible.stream().noneMatch(selected::contains)) selected.add(feasible.getFirst());
     }
 
     private void chooseTagged(List<String> required, List<TravelCandidate> pool, String constraint,
-                              List<TravelCandidate> selected, Set<String> core) {
+                              List<TravelCandidate> selected, Set<String> core, Set<String> gaps) {
         for (String tag : required) {
-            TravelCandidate match = pool.stream().filter(this::usable)
+            List<TravelCandidate> matches = pool.stream()
                     .filter(item -> item.tags().stream().anyMatch(value -> value.equalsIgnoreCase(tag)))
-                    .min(byCost()).orElse(null);
-            if (match == null) core.add(constraint + ":" + tag);
-            else if (!selected.contains(match)) selected.add(match);
+                    .sorted(byCost()).toList();
+            if (matches.isEmpty()) {
+                // 没有任何候选说明数据源没返回数据，只有确有数据却不含该类别才是约束矛盾。
+                if (pool.isEmpty()) gaps.add(constraint + ":" + tag);
+                else core.add(constraint + ":" + tag);
+                continue;
+            }
+            chooseWithFallback(constraint + ":" + tag, matches, selected, gaps);
         }
     }
 
-    private TravelSolverResult unsat(TravelConstraintSpec spec, long total, Set<String> core) {
+    private TravelSolverResult unsat(TravelConstraintSpec spec, long total, Set<String> core, Set<String> gaps) {
         List<TravelSolverResult.RelaxationSuggestion> suggestions = new ArrayList<>();
         if (core.contains("max_budget")) suggestions.add(new TravelSolverResult.RelaxationSuggestion(
                 "max_budget", "当前最低可行组合仍超出预算，可提高预算上限",
@@ -88,7 +120,15 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
                 "transport_availability", "没有满足出行方式或人数的交通候选，可放宽交通方式",
                 Map.of("allowedTransportModes", List.of()), 0));
         return new TravelSolverResult(TravelSolverResult.SolverStatus.UNSAT, List.of(), total,
-                List.copyOf(core), suggestions, 0D, Map.of("solver", "FINITE_DOMAIN_JAVA"));
+                List.copyOf(core), suggestions, 0D, diagnostics(gaps, 0));
+    }
+
+    private Map<String, Object> diagnostics(Set<String> gaps, int candidateCount) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("solver", "FINITE_DOMAIN_JAVA");
+        if (candidateCount > 0) diagnostics.put("candidateCount", candidateCount);
+        diagnostics.put("dataGaps", List.copyOf(gaps));
+        return diagnostics;
     }
 
     private long totalCost(TravelConstraintSpec spec, List<TravelCandidate> selected) {

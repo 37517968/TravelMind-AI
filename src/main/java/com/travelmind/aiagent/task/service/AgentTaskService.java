@@ -56,7 +56,7 @@ public class AgentTaskService {
             task.setConversationId(request.getConversationId());
             task.setTaskType(request.getTaskType().name());
             task.setStatus(AgentTaskStatus.QUEUED.name());
-            task.setWorkflowVersion("formal-travel-stategraph-v3");
+            task.setWorkflowVersion("formal-travel-stategraph-v4");
             ObjectNode requestJson = objectMapper.valueToTree(request);
             requestJson.put("_supplementalVersion", 0);
             requestJson.set("conversationHistory",

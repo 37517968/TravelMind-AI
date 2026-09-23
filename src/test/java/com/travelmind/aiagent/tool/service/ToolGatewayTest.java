@@ -66,6 +66,27 @@ class ToolGatewayTest {
     }
 
     @Test
+    void shouldTreatToolFailureMessageAsFailure() {
+        ToolResult result = gateway.execute(policy(ToolRiskLevel.READ_ONLY, true, 1, Duration.ofSeconds(1)),
+                "{\"type\":\"object\"}", "{}", ToolExecutionContext.anonymous(),
+                input -> "搜索失败：INVALID_USER_KEY");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("TOOL_UPSTREAM_ERROR");
+        assertThat(result.data()).isNull();
+    }
+
+    @Test
+    void shouldKeepStructuredToolPayloadAsSuccess() {
+        ToolResult result = gateway.execute(policy(ToolRiskLevel.READ_ONLY, true, 1, Duration.ofSeconds(1)),
+                "{\"type\":\"object\"}", "{}", ToolExecutionContext.anonymous(),
+                input -> "{\"status\":\"1\",\"count\":\"3\",\"pois\":[]}");
+
+        assertThat(result.success()).isTrue();
+        assertThat(String.valueOf(result.data())).contains("count");
+    }
+
+    @Test
     void shouldDenyHighRiskToolUnlessExplicitlyEnabledAndApproved() {
         ToolResult result = gateway.execute(policy(ToolRiskLevel.HIGH_RISK, false, 1, Duration.ofSeconds(1)),
                 "{\"type\":\"object\"}", "{}", ToolExecutionContext.anonymous(), input -> "never");

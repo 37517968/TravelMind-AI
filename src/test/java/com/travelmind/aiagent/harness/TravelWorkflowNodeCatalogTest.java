@@ -10,10 +10,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TravelWorkflowNodeCatalogTest {
     @Test
@@ -33,6 +36,56 @@ class TravelWorkflowNodeCatalogTest {
     }
 
     @Test
+    void greetingShouldRouteToChitchatReplyWithoutCallingPlanningNodes() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog();
+        WorkflowState state = new WorkflowState(3L, Map.of("prompt", "你好呀",
+                "conversationHistory", List.of(Map.of("role", "user", "content", "你好"))));
+
+        NodeExecutionResult intent = catalog.fixedNode(TravelPlanningGraphFactory.INTENT, state).execute(state);
+
+        assertThat(intent.getData()).containsEntry("workflowRoute", "CHAT")
+                .containsEntry("intent", "CHAT").containsEntry("newPlan", false);
+        state.merge(intent.getData());
+        NodeExecutionResult reply = catalog.fixedNode(TravelPlanningGraphFactory.CHAT_REPLY, state).execute(state);
+        assertThat(reply.getData()).containsEntry("responseType", "CHAT");
+        assertThat(String.valueOf(reply.getData().get("chatReply"))).contains("TravelMind");
+    }
+
+    @Test
+    void modelDecisionShouldWinOverHeuristicAndCarveOutNewPlan() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog("""
+                {"intent":"NEW_PLAN","confidence":0.9,"reason":"用户更换目的地"}""");
+        WorkflowState state = new WorkflowState(4L, Map.of("prompt", "帮我规划杭州三日游",
+                "userClarification", "改成去三亚吧", "_supplementalVersion", 1));
+
+        NodeExecutionResult intent = catalog.fixedNode(TravelPlanningGraphFactory.INTENT, state).execute(state);
+
+        assertThat(intent.getData()).containsEntry("intent", "NEW_PLAN").containsEntry("newPlan", true)
+                .containsEntry("intentSource", "MODEL").containsEntry("workflowRoute", "CONTINUE");
+        assertThat(intent.getModelCalls()).isEqualTo(1);
+    }
+
+    @Test
+    void newPlanResetShouldKeepOnlyLatestRequestForExtraction() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog();
+        java.util.Map<String, Object> request = new java.util.HashMap<>();
+        request.put("prompt", "帮我规划杭州三日游");
+        request.put("userClarification", "重新规划去三亚");
+        request.put("destination", "杭州");
+        request.put("_supplementalVersion", 2);
+        request.put("supplementalHistory", List.of(Map.of("destination", "杭州")));
+        WorkflowState state = new WorkflowState(5L, request);
+
+        TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
+        NodeExecutionResult extraction = catalog.fixedNode(TravelPlanningGraphFactory.EXTRACT, state).execute(state);
+
+        com.travelmind.aiagent.planning.model.TravelConstraintSpec spec =
+                (com.travelmind.aiagent.planning.model.TravelConstraintSpec) extraction.getData().get("constraintSpec");
+        assertThat(spec.destination()).isEqualTo("三亚");
+        assertThat(state.getRequest()).doesNotContainKey("destination");
+    }
+
+    @Test
     void nodeResultShouldBeCheckpointRoundTripSafe() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         NodeExecutionResult original = NodeExecutionResult.builder()
@@ -48,10 +101,23 @@ class TravelWorkflowNodeCatalogTest {
 
     @SuppressWarnings("unchecked")
     private TravelWorkflowNodeCatalog catalog() {
+        return catalog(null);
+    }
+
+    /** stubReply 为 null 时 Sentinel 桩直接返回 null，用于验证模型不可用的规则兜底；否则模拟模型返回该文本。 */
+    @SuppressWarnings("unchecked")
+    private TravelWorkflowNodeCatalog catalog(String stubReply) {
         ObjectProvider<TravelKnowledgeIndexService> knowledge = mock(ObjectProvider.class);
         ObjectProvider<TravelToolFacade> tools = mock(ObjectProvider.class);
+        SentinelGovernanceService sentinel = mock(SentinelGovernanceService.class);
+        if (stubReply != null) {
+            try {
+                when(sentinel.executeModel(any())).thenReturn(stubReply);
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+        }
         return new TravelWorkflowNodeCatalog(mock(ChatModel.class), new ObjectMapper(), knowledge, tools,
-                mock(SentinelGovernanceService.class), mock(AgentProgressEventStore.class),
-                new PlatformObservability());
+                sentinel, mock(AgentProgressEventStore.class), new PlatformObservability());
     }
 }

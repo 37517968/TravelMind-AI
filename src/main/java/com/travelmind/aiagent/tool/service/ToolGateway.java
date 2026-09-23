@@ -13,16 +13,19 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class ToolGateway {
+    private static final Pattern FAILURE_MESSAGE = Pattern.compile("(出错|失败|异常)\\s*[:：]");
     private final ToolInputValidator validator;
     private final SentinelGovernanceService sentinel;
     private final StringRedisTemplate redis;
@@ -215,11 +218,12 @@ public class ToolGateway {
         }
     }
 
+    /**
+     * 本地工具用 "xxx出错：/xxx失败：" 文案表达上游故障，统一信封必须识别，否则失败结果会被缓存并当成成功证据。
+     */
     private boolean looksLikeFailure(String value) {
         if (value == null || value.isBlank()) return true;
-        String lower = value.toLowerCase();
-        return lower.startsWith("error") || value.contains("查询出错") || value.contains("搜索出错")
-                || value.contains("查询失败") || value.contains("规划失败");
+        return FAILURE_MESSAGE.matcher(value).find() || value.toLowerCase().startsWith("error");
     }
 
     private String sanitizeAndCrop(String value, int maxChars) {

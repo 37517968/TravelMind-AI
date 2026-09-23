@@ -19,7 +19,10 @@ public class TravelFreshnessValidator {
         Instant now = clock.instant();
         List<String> stale = solution.selected().stream().filter(item -> !item.freshAt(now))
                 .map(TravelCandidate::id).toList();
-        List<String> unavailable = solution.selected().stream().filter(item -> !item.available())
+        // 估算候选本就不承诺实时库存：只有“曾确认过可用性”的候选失去可用性才算过期。
+        List<String> unavailable = solution.selected().stream()
+                .filter(item -> !item.available())
+                .filter(item -> !"ESTIMATED".equals(String.valueOf(item.attributes().get("priceConfidence"))))
                 .map(TravelCandidate::id).toList();
         return new FreshnessResult(stale.isEmpty() && unavailable.isEmpty(), stale, unavailable, now);
     }

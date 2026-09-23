@@ -1,9 +1,8 @@
 package com.travelmind.aiagent.harness;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.travelmind.aiagent.rag.TravelKnowledgeIndexService;
-import com.travelmind.aiagent.observability.PlatformObservability;
 import com.travelmind.aiagent.governance.SentinelGovernanceService;
+import com.travelmind.aiagent.observability.PlatformObservability;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
 import com.travelmind.aiagent.task.model.AgentTask;
@@ -12,13 +11,15 @@ import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -26,50 +27,134 @@ class ExplicitTravelWorkflowEngineTest {
     @Test
     @SuppressWarnings("unchecked")
     void missingRequiredInputShouldCheckpointAndPauseInsteadOfCallingModel() throws Exception {
-        AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);
-        CheckpointStore checkpointStore = mock(CheckpointStore.class);
+        Fixture fixture = fixture(7L, Map.of("prompt", "", "maxModelCalls", 3, "maxTokens", 12000,
+                "maxNodeExecutions", 32), List.of());
+        try (fixture) {
+            fixture.engine().execute(7L);
+        }
+
+        assertThat(fixture.startedNodes()).containsExactly(TravelPlanningGraphFactory.INTENT + "_v0",
+                TravelPlanningGraphFactory.EXTRACT + "_v0", TravelPlanningGraphFactory.CHECK + "_v0");
+        verify(fixture.checkpoints()).waiting(any(), any(NodeExecutionResult.class), any(), anyLong());
+        verify(fixture.tasks()).markWaiting(eq(7L), eq(TravelPlanningGraphFactory.CHECK + "_v0"), contains("目的地"));
+        verifyNoInteractions(fixture.chatModel());
+    }
+
+    @Test
+    void greetingShouldBeRoutedToChatReplyWithoutPlanning() throws Exception {
+        Fixture fixture = fixture(9L, Map.of("prompt", "你好", "maxModelCalls", 3, "maxTokens", 12000,
+                "maxNodeExecutions", 32), List.of());
+        try (fixture) {
+            fixture.engine().execute(9L);
+        }
+
+        assertThat(fixture.startedNodes()).containsExactly(TravelPlanningGraphFactory.INTENT + "_v0",
+                TravelPlanningGraphFactory.CHAT_REPLY + "_v0");
+        verify(fixture.tasks()).markSucceeded(eq(9L), argThat(json -> json.contains("\"responseType\":\"CHAT\"")
+                && json.contains("TravelMind")));
+        verify(fixture.tasks(), never()).markWaiting(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void newPlanIntentShouldDiscardPreviousTripStateBeforeExtraction() throws Exception {
+        NodeExecutionResult previous = NodeExecutionResult.builder()
+                .data(Map.of("constraintSpec", Map.of("destination", "杭州"), "itinerary", "旧杭州行程"))
+                .build();
+        Fixture fixture = fixture(11L, Map.of(
+                "prompt", "帮我规划杭州三日游",
+                "userClarification", "算了，改去三亚",
+                "_supplementalVersion", 1,
+                "supplementalHistory", List.of(Map.of("destination", "杭州", "days", 3)),
+                "maxModelCalls", 6, "maxTokens", 12000, "maxNodeExecutions", 32),
+                List.of(successCheckpoint(11L, TravelPlanningGraphFactory.EXTRACT + "_v0", fixtureMapper, previous)));
+        when(fixture.sentinel().executeModel(any())).thenReturn("""
+                {"intent":"NEW_PLAN","confidence":0.93,"reason":"用户更换了目的地"}""");
+        try (fixture) {
+            fixture.engine().execute(11L);
+        }
+
+        assertThat(fixture.startedNodes()).contains(TravelPlanningGraphFactory.EXTRACT + "_v1");
+        Map<String, Object> stateAtExtraction = fixture.extractionState().get();
+        Map<String, Object> request = (Map<String, Object>) stateAtExtraction.get("request");
+        Map<String, Object> data = (Map<String, Object>) stateAtExtraction.get("data");
+        assertThat(request.get("prompt")).isEqualTo("算了，改去三亚");
+        assertThat(request).doesNotContainKey("userClarification").doesNotContainKey("destination").doesNotContainKey("days");
+        assertThat(data).doesNotContainKey("constraintSpec").doesNotContainKey("itinerary");
+        assertThat(data).containsEntry("intent", "NEW_PLAN");
+    }
+
+    private final ObjectMapper fixtureMapper = new ObjectMapper().findAndRegisterModules();
+
+    private AgentWorkflowCheckpoint successCheckpoint(Long taskId, String nodeId, ObjectMapper mapper,
+                                                      NodeExecutionResult output) throws Exception {
+        AgentWorkflowCheckpoint checkpoint = new AgentWorkflowCheckpoint();
+        checkpoint.setTaskId(taskId);
+        checkpoint.setNodeId(nodeId);
+        checkpoint.setNodeStatus("SUCCEEDED");
+        checkpoint.setAttempt(1);
+        checkpoint.setOutputSnapshot(mapper.writeValueAsString(output));
+        return checkpoint;
+    }
+
+    private Fixture fixture(Long taskId, Map<String, Object> request, List<AgentWorkflowCheckpoint> checkpoints)
+            throws Exception {
+        AgentTaskMapper tasks = mock(AgentTaskMapper.class);
+        CheckpointStore checkpointsStore = mock(CheckpointStore.class);
         AgentProgressEventStore events = mock(AgentProgressEventStore.class);
         ChatModel chatModel = mock(ChatModel.class);
-        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        SentinelGovernanceService sentinel = mock(SentinelGovernanceService.class);
+        ObjectMapper mapper = fixtureMapper;
         TravelWorkflowNodeCatalog catalog = new TravelWorkflowNodeCatalog(chatModel, mapper,
-                mock(ObjectProvider.class), mock(ObjectProvider.class), mock(SentinelGovernanceService.class), events,
+                mock(ObjectProvider.class), mock(ObjectProvider.class), sentinel, events,
                 new PlatformObservability());
         AgentTask task = new AgentTask();
-        task.setId(7L);
+        task.setId(taskId);
         task.setStatus("RUNNING");
-        task.setWorkflowVersion("travel-plan-v1");
+        task.setWorkflowVersion("formal-travel-stategraph-v4");
         task.setModelCallsUsed(0);
         task.setTokensUsed(0);
         task.setNodeExecutionsUsed(0);
         task.setCancelRequested(false);
-        task.setRequestJson(mapper.writeValueAsString(Map.of(
-                "prompt", "", "maxModelCalls", 3, "maxTokens", 12000, "maxNodeExecutions", 32)));
-        when(taskMapper.claimQueuedTask(7L)).thenReturn(1);
-        when(taskMapper.selectById(7L)).thenReturn(task);
-        when(checkpointStore.list(7L)).thenReturn(List.of());
-        when(checkpointStore.latest(eq(7L), anyString())).thenReturn(null);
-        when(checkpointStore.start(eq(7L), any(), anyInt(), any(), any()))
-                .thenAnswer(invocation -> {
-                    AgentWorkflowCheckpoint cp = new AgentWorkflowCheckpoint();
-                    cp.setTaskId(7L);
-                    cp.setNodeId(((NodeExecutor) invocation.getArgument(1)).nodeId());
-                    return cp;
-                });
+        task.setRequestJson(mapper.writeValueAsString(request));
+        when(tasks.claimQueuedTask(taskId)).thenReturn(1);
+        when(tasks.selectById(taskId)).thenReturn(task);
+        when(checkpointsStore.list(taskId)).thenReturn(checkpoints);
+        when(checkpointsStore.latest(eq(taskId), anyString())).thenReturn(null);
+        List<String> startedNodes = new ArrayList<>();
+        Object[] extractionHolder = new Object[1];
+        when(checkpointsStore.start(eq(taskId), any(), anyInt(), any(), any())).thenAnswer(invocation -> {
+            NodeExecutor node = invocation.getArgument(1);
+            startedNodes.add(node.nodeId());
+            if (node.nodeId().startsWith(TravelPlanningGraphFactory.EXTRACT)) {
+                extractionHolder[0] = invocation.getArgument(4);
+            }
+            AgentWorkflowCheckpoint checkpoint = new AgentWorkflowCheckpoint();
+            checkpoint.setTaskId(taskId);
+            checkpoint.setNodeId(node.nodeId());
+            return checkpoint;
+        });
 
         ThreadPoolTaskExecutor parallelExecutor = new ThreadPoolTaskExecutor();
         parallelExecutor.setCorePoolSize(1);
         parallelExecutor.initialize();
-        try (ExecutorService invocationExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
-            ExplicitTravelWorkflowEngine engine = new ExplicitTravelWorkflowEngine(taskMapper, checkpointStore,
-                    catalog, events, mapper, parallelExecutor, invocationExecutor, new PlatformObservability(),
-                    mock(AgentConversationMemoryService.class), new TravelPlanningGraphFactory());
-            engine.execute(7L);
-        } finally {
+        ExecutorService invocationExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        ExplicitTravelWorkflowEngine engine = new ExplicitTravelWorkflowEngine(tasks, checkpointsStore,
+                catalog, events, mapper, parallelExecutor, invocationExecutor, new PlatformObservability(),
+                mock(AgentConversationMemoryService.class), new TravelPlanningGraphFactory());
+        return new Fixture(engine, tasks, checkpointsStore, chatModel, sentinel, startedNodes,
+                () -> (Map<String, Object>) extractionHolder[0], parallelExecutor, invocationExecutor);
+    }
+
+    private record Fixture(ExplicitTravelWorkflowEngine engine, AgentTaskMapper tasks, CheckpointStore checkpoints,
+                           ChatModel chatModel, SentinelGovernanceService sentinel, List<String> startedNodes,
+                           java.util.function.Supplier<Map<String, Object>> extractionState,
+                           ThreadPoolTaskExecutor parallelExecutor, ExecutorService invocationExecutor)
+            implements AutoCloseable {
+        @Override
+        public void close() {
+            invocationExecutor.shutdownNow();
             parallelExecutor.shutdown();
         }
-
-        verify(checkpointStore).waiting(any(), any(NodeExecutionResult.class), any(), anyLong());
-        verify(taskMapper).markWaiting(eq(7L), eq(TravelPlanningGraphFactory.CHECK + "_v0"), contains("目的地"));
-        verifyNoInteractions(chatModel);
     }
 }

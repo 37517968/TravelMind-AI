@@ -17,9 +17,12 @@ import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 
 /**
  * 声明式固定路由。节点实现由 Harness 注入，因此 StateGraph 负责路由，Harness 继续负责可靠执行。
+ * 入口先由 LLM 判定意图：闲聊走 CHAT_REPLY 直接回复，旅行诉求才进入正式规划链路。
  */
 @Component
 public class TravelPlanningGraphFactory {
+    public static final String INTENT = "INTENT_ROUTING";
+    public static final String CHAT_REPLY = "CHAT_REPLY";
     public static final String EXTRACT = "CONSTRAINT_EXTRACTION";
     public static final String CHECK = "CONSTRAINT_VALIDATION";
     public static final String CONTEXT = "CONTEXT_BUILDING";
@@ -38,6 +41,8 @@ public class TravelPlanningGraphFactory {
             graphStateTemplate.registerKeyAndStrategy("lastNode", new ReplaceStrategy());
             graphStateTemplate.registerKeyAndStrategy("taskId", new ReplaceStrategy());
             StateGraph graph = new StateGraph(graphStateTemplate);
+            add(graph, INTENT, nodeRunner);
+            add(graph, CHAT_REPLY, nodeRunner);
             add(graph, EXTRACT, nodeRunner);
             add(graph, CHECK, nodeRunner);
             add(graph, CONTEXT, nodeRunner);
@@ -49,7 +54,10 @@ public class TravelPlanningGraphFactory {
             add(graph, FRESHNESS, nodeRunner);
             add(graph, PERSIST, nodeRunner);
 
-            graph.addEdge(START, EXTRACT)
+            graph.addEdge(START, INTENT)
+                    .addConditionalEdges(INTENT, edge_async(state -> state.value("route", "CONTINUE")), Map.of(
+                            "CONTINUE", EXTRACT,
+                            "CHAT", CHAT_REPLY))
                     .addEdge(EXTRACT, CHECK)
                     .addConditionalEdges(CHECK, edge_async(state -> state.value("route", "WAITING")), Map.of(
                             "CONTINUE", CONTEXT,
@@ -68,7 +76,8 @@ public class TravelPlanningGraphFactory {
                     .addConditionalEdges(FRESHNESS, edge_async(state -> state.value("route", "STALE")), Map.of(
                             "FRESH", PERSIST,
                             "STALE", RELAX))
-                    .addEdge(PERSIST, END);
+                    .addEdge(PERSIST, END)
+                    .addEdge(CHAT_REPLY, END);
             return graph.compile();
         } catch (GraphStateException error) {
             throw new IllegalStateException("旅行规划 StateGraph 编译失败", error);

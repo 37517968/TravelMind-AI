@@ -19,11 +19,13 @@ POST /agent/tasks + Idempotency-Key
 
 HTTP 提交只创建任务并返回 `202 + taskId`，不等待天气、POI、RAG 或模型调用。
 
-## 可恢复的正式旅行规划工作流 v3
+## 可恢复的正式旅行规划工作流 v4
 
 ```mermaid
 flowchart TD
-    A[CONSTRAINT_EXTRACTION] --> B[CONSTRAINT_VALIDATION]
+    I[INTENT_ROUTING\nLLM 意图判定] -->|CHAT| K[CHAT_REPLY 流式回复] --> Z([SUCCEEDED])
+    I -->|CONTINUE / NEW_PLAN| A[CONSTRAINT_EXTRACTION]
+    A --> B[CONSTRAINT_VALIDATION]
     B -->|缺少目的地/预算| W[WAITING_USER]
     W -->|resume + supplemental| A
     B -->|完整| C[CONTEXT_BUILDING / Hybrid RAG]

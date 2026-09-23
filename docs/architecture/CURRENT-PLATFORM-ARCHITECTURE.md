@@ -153,6 +153,7 @@ sequenceDiagram
 
     H->>DB: 读取 request_json、执行预算和成功 Checkpoint
     H->>H: 重建 WorkflowState(request/data/metrics)
+    H->>L: INTENT_ROUTING，短期上下文 + 当前输入判定 CHAT / CONTINUE / NEW_PLAN
     H->>L: CONSTRAINT_EXTRACTION，输出 TravelConstraintSpec JSON
     H->>DB: 保存带 supplementalVersion 的节点 Checkpoint
 
