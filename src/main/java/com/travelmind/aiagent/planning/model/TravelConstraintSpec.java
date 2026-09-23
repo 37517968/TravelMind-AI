@@ -36,8 +36,8 @@ public record TravelConstraintSpec(
         allowedTransportModes = immutable(allowedTransportModes);
         requiredAttractionTags = immutable(requiredAttractionTags);
         requiredCuisineTags = immutable(requiredCuisineTags);
-        hardConstraints = hardConstraints == null ? Map.of() : Map.copyOf(hardConstraints);
-        softPreferences = softPreferences == null ? Map.of() : Map.copyOf(softPreferences);
+        hardConstraints = ImmutableValues.map(hardConstraints);
+        softPreferences = ImmutableValues.map(softPreferences);
     }
 
     @JsonIgnore

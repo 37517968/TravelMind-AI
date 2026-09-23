@@ -13,10 +13,10 @@ public record TravelSolverResult(
         Map<String, Object> diagnostics) {
 
     public TravelSolverResult {
-        selected = selected == null ? List.of() : List.copyOf(selected);
-        unsatCore = unsatCore == null ? List.of() : List.copyOf(unsatCore);
-        relaxationSuggestions = relaxationSuggestions == null ? List.of() : List.copyOf(relaxationSuggestions);
-        diagnostics = diagnostics == null ? Map.of() : Map.copyOf(diagnostics);
+        selected = ImmutableValues.list(selected);
+        unsatCore = ImmutableValues.list(unsatCore);
+        relaxationSuggestions = ImmutableValues.list(relaxationSuggestions);
+        diagnostics = ImmutableValues.map(diagnostics);
     }
 
     public enum SolverStatus { SAT, UNSAT, UNKNOWN }
@@ -24,7 +24,7 @@ public record TravelSolverResult(
     public record RelaxationSuggestion(String constraintId, String explanation,
                                        Map<String, Object> proposedChanges, long estimatedImpactCents) {
         public RelaxationSuggestion {
-            proposedChanges = proposedChanges == null ? Map.of() : Map.copyOf(proposedChanges);
+            proposedChanges = ImmutableValues.map(proposedChanges);
         }
     }
 }

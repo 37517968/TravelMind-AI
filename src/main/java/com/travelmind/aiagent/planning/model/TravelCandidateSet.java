@@ -29,6 +29,6 @@ public record TravelCandidateSet(
     }
 
     private static List<TravelCandidate> copy(List<TravelCandidate> values) {
-        return values == null ? List.of() : List.copyOf(values);
+        return ImmutableValues.list(values);
     }
 }

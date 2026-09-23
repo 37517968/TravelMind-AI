@@ -21,8 +21,8 @@ public record TravelCandidate(
         Map<String, Object> attributes) {
 
     public TravelCandidate {
-        tags = tags == null ? List.of() : List.copyOf(tags);
-        attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+        tags = ImmutableValues.list(tags);
+        attributes = ImmutableValues.map(attributes);
         source = source == null ? "UNKNOWN" : source;
     }
 
