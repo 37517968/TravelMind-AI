@@ -12,6 +12,11 @@ public interface AgentTaskMapper extends BaseMapper<AgentTask> {
     @Select("SELECT * FROM agent_task WHERE request_id = #{requestId} LIMIT 1")
     AgentTask selectByRequestId(@Param("requestId") String requestId);
 
+    @Select("SELECT * FROM agent_task WHERE conversation_id=#{conversationId} " +
+            "AND status='SUCCEEDED' AND task_type IN ('PLAN','MODIFY') " +
+            "ORDER BY finished_at DESC, id DESC LIMIT 1")
+    AgentTask selectLatestSucceededPlan(@Param("conversationId") String conversationId);
+
     @Update("UPDATE agent_task SET status='RUNNING', started_at=COALESCE(started_at, NOW(3)), " +
             "updated_at=NOW(3), version=version+1 WHERE id=#{id} AND status='QUEUED' AND cancel_requested=0")
     int claimQueuedTask(@Param("id") Long id);

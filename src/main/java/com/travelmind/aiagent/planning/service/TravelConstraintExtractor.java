@@ -17,23 +17,29 @@ import java.util.regex.Pattern;
 @Component
 public class TravelConstraintExtractor {
     private static final Pattern DAYS = Pattern.compile("([一二两三四五六七八九十\\d]{1,2})\\s*[天日]");
-    private static final Pattern BUDGET = Pattern.compile("(?:预算|不超过|控制在)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:元|块)?");
+    private static final Pattern BUDGET = Pattern.compile(
+            "(?:预算(?:改成|调整为|改为|提高到|降到)?|不超过|控制在)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:元|块)?");
     private static final Pattern TRAVELERS = Pattern.compile("([一二两三四五六七八九十\\d]{1,2})\\s*(?:个)?(?:人|位)");
     private static final Pattern DESTINATION = Pattern.compile(
             "(?:去|到|目的地[:：]?)\\s*([\\p{IsHan}]{2,8}?)(?=玩|游|旅行|[，,\\s\\d]|$)");
+    private static final Pattern CHANGED_DESTINATION = Pattern.compile(
+            "(?:改去|换去|改成|换成|目的地(?:改成|改为))\\s*([\\p{IsHan}]{2,8}?)(?=玩|游|旅行|[，,。\\s\\d]|$)");
 
     public TravelConstraintSpec extract(Map<String, Object> request) {
         Map<String, Object> safe = request == null ? Map.of() : request;
         Map<String, Object> constraints = mapValue(safe.get("constraints"));
         String prompt = (stringValue(safe.get("prompt")) + " " + stringValue(safe.get("userClarification"))).trim();
-        String destination = firstNonBlank(stringValue(safe.get("destination")),
+        boolean modifying = Boolean.TRUE.equals(safe.get("modificationMode"));
+        String changedDestination = modifying ? match(prompt, CHANGED_DESTINATION) : "";
+        String destination = firstNonBlank(changedDestination, stringValue(safe.get("destination")),
                 stringValue(constraints.get("destination")), match(prompt, DESTINATION));
         Integer promptDays = optionalIntMatch(prompt, DAYS);
         Integer promptTravelers = optionalIntMatch(prompt, TRAVELERS);
         int days = promptDays == null ? intValue(safe.get("days"), 3) : promptDays;
         int travelers = promptTravelers == null ? intValue(safe.get("travelers"), 1) : promptTravelers;
-        Long budget = moneyToCents(safe.get("budget"));
-        if (budget == null) budget = moneyMatchToCents(prompt);
+        Long promptBudget = moneyMatchToCents(prompt);
+        Long budget = modifying && promptBudget != null ? promptBudget : moneyToCents(safe.get("budget"));
+        if (budget == null) budget = promptBudget;
         Long hotelMax = moneyToCents(constraints.get("hotelMaxNightly"));
 
         return new TravelConstraintSpec(

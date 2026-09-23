@@ -16,16 +16,18 @@ public class AgentTaskCreateRequest {
     @NotBlank
     private String conversationId;
     private AgentTaskType taskType = AgentTaskType.PLAN;
+    /** 修改已有行程时的基线任务；未传时后端会在同一会话中查找最近成功的规划任务。 */
+    private Long baseTaskId;
     @NotBlank
     private String prompt;
     private String destination;
     private LocalDate startDate;
     @Min(1) @Max(30)
-    private Integer days = 3;
+    private Integer days;
     @Min(0)
     private Integer budget;
     @Min(1) @Max(30)
-    private Integer travelers = 1;
+    private Integer travelers;
     private String travelType;
     @Min(1) @Max(10)
     private Integer maxModelCalls = 8;

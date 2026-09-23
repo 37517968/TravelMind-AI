@@ -23,6 +23,7 @@ import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 public class TravelPlanningGraphFactory {
     public static final String INTENT = "INTENT_ROUTING";
     public static final String CHAT_REPLY = "CHAT_REPLY";
+    public static final String BASE_PLAN = "BASE_PLAN_LOADING";
     public static final String EXTRACT = "CONSTRAINT_EXTRACTION";
     public static final String CHECK = "CONSTRAINT_VALIDATION";
     public static final String CONTEXT = "CONTEXT_BUILDING";
@@ -37,6 +38,7 @@ public class TravelPlanningGraphFactory {
     /** 面向用户的节点中文名，避免把内部节点 ID 直接暴露到聊天界面。 */
     private static final Map<String, String> LABELS = Map.ofEntries(
             Map.entry(INTENT, "判断你的意图"), Map.entry(CHAT_REPLY, "组织回复"),
+            Map.entry(BASE_PLAN, "读取上一版计划"),
             Map.entry(EXTRACT, "理解旅行要求"), Map.entry(CHECK, "核对信息是否齐全"),
             Map.entry(CONTEXT, "查阅目的地资料"), Map.entry(CANDIDATES, "查询可订的住宿景点"),
             Map.entry(SOLVE, "编排预算与行程"), Map.entry(RELAX, "给出调整建议"),
@@ -59,6 +61,7 @@ public class TravelPlanningGraphFactory {
             StateGraph graph = new StateGraph(graphStateTemplate);
             add(graph, INTENT, nodeRunner);
             add(graph, CHAT_REPLY, nodeRunner);
+            add(graph, BASE_PLAN, nodeRunner);
             add(graph, EXTRACT, nodeRunner);
             add(graph, CHECK, nodeRunner);
             add(graph, CONTEXT, nodeRunner);
@@ -73,7 +76,11 @@ public class TravelPlanningGraphFactory {
             graph.addEdge(START, INTENT)
                     .addConditionalEdges(INTENT, edge_async(state -> state.value("route", "CONTINUE")), Map.of(
                             "CONTINUE", EXTRACT,
+                            "MODIFY", BASE_PLAN,
                             "CHAT", CHAT_REPLY))
+                    .addConditionalEdges(BASE_PLAN, edge_async(state -> state.value("route", "WAITING")), Map.of(
+                            "CONTINUE", EXTRACT,
+                            "WAITING", END))
                     .addEdge(EXTRACT, CHECK)
                     .addConditionalEdges(CHECK, edge_async(state -> state.value("route", "WAITING")), Map.of(
                             "CONTINUE", CONTEXT,

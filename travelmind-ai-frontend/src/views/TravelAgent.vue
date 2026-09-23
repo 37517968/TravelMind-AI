@@ -87,6 +87,8 @@ localStorage.setItem('travel-conversation-id', conversationId)
 
 let eventSource = null
 let activeTaskId = null
+// 精确绑定用户当前看到的上一版完整计划；刷新页面后由后端按 conversationId 自动查找。
+let lastSucceededPlanTaskId = null
 let waitingForUser = false
 let answerMessageIndex = -1
 
@@ -132,22 +134,24 @@ const appendStep = (event, state) => {
 }
 
 const readFinalResult = async () => {
-  if (!activeTaskId) return
+  if (!activeTaskId) return null
   const { data } = await getAgentTask(activeTaskId)
   const resultJson = data?.task?.resultJson
-  if (!resultJson) return
+  if (!resultJson) return null
   const message = answerMessageIndex >= 0 ? messages.value[answerMessageIndex] : null
-  if (message && message.content.trim()) return
   let text = resultJson
+  let parsedResult = null
   try {
-    const result = JSON.parse(resultJson)
-    text = result.itinerary || ''
+    parsedResult = JSON.parse(resultJson)
+    text = parsedResult.itinerary || ''
   } catch {
     // 非 JSON 结果按纯文本展示
   }
-  if (!text) return
-  if (message) message.content = text
-  else addMessage(text, false, 'ai-final')
+  if (text && !(message && message.content.trim())) {
+    if (message) message.content = text
+    else addMessage(text, false, 'ai-final')
+  }
+  return parsedResult
 }
 
 const subscribeTask = (taskId) => {
@@ -186,7 +190,13 @@ const subscribeTask = (taskId) => {
           if (step.state === 'running') step.state = status === 'FAILED' ? 'error' : 'ok'
         })
       }
-      if (status === 'SUCCEEDED') await readFinalResult()
+      if (status === 'SUCCEEDED') {
+        const completedTaskId = activeTaskId
+        const result = await readFinalResult()
+        if (result?.responseType === 'PLAN' || result?.responseType === 'MODIFY') {
+          lastSucceededPlanTaskId = completedTaskId
+        }
+      }
       if (status !== 'SUCCEEDED') addMessage(`任务已结束：${status}`, false, 'ai-error')
       activeTaskId = null
       waitingForUser = false
@@ -220,6 +230,7 @@ const sendMessage = async (message) => {
     const { data } = await createAgentTask({
       conversationId,
       taskType: 'PLAN',
+      ...(lastSucceededPlanTaskId ? { baseTaskId: lastSucceededPlanTaskId } : {}),
       prompt: message,
       constraints: {}
     })

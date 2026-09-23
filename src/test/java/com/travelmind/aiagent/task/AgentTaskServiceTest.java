@@ -7,6 +7,7 @@ import com.travelmind.aiagent.task.mapper.AgentWorkflowCheckpointMapper;
 import com.travelmind.aiagent.task.mapper.OutboxEventMapper;
 import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.model.OutboxEvent;
+import com.travelmind.aiagent.task.model.AgentTaskType;
 import com.travelmind.aiagent.task.service.AgentTaskService;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
 import com.travelmind.aiagent.observability.PlatformObservability;
@@ -95,5 +96,37 @@ class AgentTaskServiceTest {
         assertThat(task.getModelCallsUsed()).isEqualTo(2);
         assertThat(task.getTokensUsed()).isEqualTo(900);
         verify(outboxMapper).insert(any(OutboxEvent.class));
+    }
+
+    @Test
+    void modifyTaskShouldSnapshotOwnedSucceededBasePlan() {
+        AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);
+        AgentTask base = new AgentTask();
+        base.setId(41L);
+        base.setUserId(7L);
+        base.setConversationId("conversation-41");
+        base.setTaskType("PLAN");
+        base.setStatus("SUCCEEDED");
+        base.setResultJson("{\"itinerary\":\"旧行程\",\"constraintSpec\":{\"destination\":\"北京\"}}");
+        when(taskMapper.selectById(41L)).thenReturn(base);
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setId(42L);
+            return 1;
+        }).when(taskMapper).insert(any(AgentTask.class));
+        AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
+                mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
+                mock(AgentConversationMemoryService.class));
+        AgentTaskCreateRequest request = new AgentTaskCreateRequest();
+        request.setUserId(7L);
+        request.setConversationId("conversation-41");
+        request.setTaskType(AgentTaskType.MODIFY);
+        request.setBaseTaskId(41L);
+        request.setPrompt("把第二天的故宫改成长城");
+
+        AgentTask created = service.submit("modify-41", request);
+
+        assertThat(created.getRequestJson()).contains("\"baseTaskId\":41", "basePlanSnapshot", "旧行程");
+        verify(taskMapper).selectById(41L);
     }
 }

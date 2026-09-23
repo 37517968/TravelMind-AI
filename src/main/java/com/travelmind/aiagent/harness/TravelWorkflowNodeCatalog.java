@@ -96,6 +96,7 @@ public class TravelWorkflowNodeCatalog {
         return switch (logicalNodeId) {
             case TravelPlanningGraphFactory.INTENT -> node(physicalId, 0, this::routeIntent);
             case TravelPlanningGraphFactory.CHAT_REPLY -> node(physicalId, 0, this::replyToChitchat);
+            case TravelPlanningGraphFactory.BASE_PLAN -> node(physicalId, 0, this::loadBasePlan);
             case TravelPlanningGraphFactory.EXTRACT -> node(physicalId, 0, this::extractConstraints);
             case TravelPlanningGraphFactory.CHECK -> node(physicalId, 0, this::validateConstraints);
             case TravelPlanningGraphFactory.CONTEXT -> node(physicalId, 0, this::buildFormalContext);
@@ -116,23 +117,26 @@ public class TravelWorkflowNodeCatalog {
         Map<String, Object> request = state.getRequest();
         String input = TravelIntentRouter.currentInput(request);
         boolean awaiting = TravelIntentRouter.awaitingClarification(request);
+        boolean hasBasePlan = TravelIntentRouter.hasBasePlan(request);
         TravelIntentRouter.Outcome explicit = TravelIntentRouter.explicit(request);
         if (explicit != null) return NodeExecutionResult.builder().data(intentData(explicit)).build();
         if (input.isBlank()) {
-            return NodeExecutionResult.builder().data(intentData(TravelIntentRouter.heuristic(input, awaiting))).build();
+            return NodeExecutionResult.builder().data(intentData(
+                    TravelIntentRouter.heuristic(input, awaiting, hasBasePlan))).build();
         }
         String context = TravelIntentRouter.contextBlock(request.get("conversationHistory"),
                 TravelIntentRouter.CONTEXT_TURNS, TravelIntentRouter.TURN_CHARS);
-        String prompt = TravelIntentRouter.prompt(context, input, awaiting);
+        String prompt = TravelIntentRouter.prompt(context, input, awaiting, hasBasePlan);
         try {
             String raw = sentinel.executeModel(() -> ChatClient.builder(chatModel).build()
                     .prompt().user(prompt).call().content());
             TravelIntentRouter.Outcome outcome = TravelIntentRouter.parse(raw, objectMapper);
-            if (outcome == null) outcome = TravelIntentRouter.heuristic(input, awaiting);
+            if (outcome == null) outcome = TravelIntentRouter.heuristic(input, awaiting, hasBasePlan);
             return NodeExecutionResult.builder().data(intentData(outcome))
                     .modelCalls(1).estimatedTokens(estimateTokens(prompt, raw)).build();
         } catch (Exception modelFailure) {
-            return NodeExecutionResult.builder().data(intentData(TravelIntentRouter.heuristic(input, awaiting)))
+            return NodeExecutionResult.builder().data(intentData(
+                            TravelIntentRouter.heuristic(input, awaiting, hasBasePlan)))
                     .warnings(List.of("意图模型不可用，已使用规则兜底判定"))
                     .modelCalls(1).estimatedTokens(estimateTokens(prompt, "")).build();
         }
@@ -177,12 +181,42 @@ public class TravelWorkflowNodeCatalog {
         return Map.of("responseType", "CHAT", "chatReply", reply);
     }
 
+    private NodeExecutionResult loadBasePlan(WorkflowState state) {
+        Object snapshot = state.getRequest().get("basePlanSnapshot");
+        if (!(snapshot instanceof Map<?, ?> plan) || plan.get("constraintSpec") == null
+                || Objects.toString(plan.get("itinerary"), "").isBlank()) {
+            String question = "我没有找到可修改的上一版完整行程，请先生成一份旅行计划，或明确说“重新规划”。";
+            return NodeExecutionResult.builder().status("WAITING_USER").data(Map.of(
+                    "workflowRoute", "WAITING", "missingFields", List.of("baseTaskId"),
+                    "clarificationQuestion", question)).build();
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        plan.forEach((key, value) -> normalized.put(String.valueOf(key), value));
+        return NodeExecutionResult.builder().data(Map.of(
+                "basePlan", normalized,
+                "baseTaskId", state.getRequest().get("baseTaskId"),
+                "changeRequest", TravelIntentRouter.currentInput(state.getRequest()),
+                "modificationMode", true,
+                "workflowRoute", "CONTINUE")).build();
+    }
+
     private NodeExecutionResult extractConstraints(WorkflowState state) {
-        Map<String, Object> extractionInput = new LinkedHashMap<>(state.getRequest());
-        String promptText = Objects.toString(state.getRequest().get("prompt"), "");
+        boolean modifying = Boolean.TRUE.equals(state.getData().get("modificationMode"));
+        Map<String, Object> extractionInput = modifying ? baseConstraintInput(state) : new LinkedHashMap<>();
+        mergeMeaningful(extractionInput, state.getRequest());
+        extractionInput.put("modificationMode", modifying);
+        String promptText = TravelIntentRouter.currentInput(state.getRequest());
         if (!promptText.isBlank()) {
             try {
-                String extractionPrompt = """
+                String extractionPrompt = modifying ? """
+                        你是旅行计划修改器。只输出 JSON Patch 风格的对象，不要 Markdown，不得生成代码。
+                        只填写用户明确要求改变的字段；没有修改的字段必须省略，禁止用默认值覆盖上一版约束。
+                        金额单位为人民币元。可修改字段：origin、destination、startDate、days、travelers、budget、constraints。
+                        上一版约束：%s
+                        上一版行程摘要：%s
+                        用户修改要求：%s
+                        """.formatted(objectMapper.writeValueAsString(extractionInput), baseItinerary(state), promptText)
+                        : """
                         你是旅行约束抽取器。只输出 JSON，不要输出 Markdown，不得生成代码。
                         金额字段统一使用人民币元；硬约束与软偏好必须分开；无法确定的字段使用 null 或空数组。
                         Schema: {"origin":"","destination":"","startDate":"yyyy-MM-dd|null","days":3,
@@ -190,27 +224,20 @@ public class TravelWorkflowNodeCatalog {
                         "requiredAttractionTags":[],"requiredCuisineTags":[],"hotelMaxNightly":null,
                         "softPreferences":{}}}
                         用户请求：%s
-                        """.formatted(promptText + " " + Objects.toString(state.getRequest().get("userClarification"), ""));
+                        """.formatted(promptText);
                 String raw = sentinel.executeModel(() -> ChatClient.builder(chatModel).build()
                         .prompt().user(extractionPrompt).call().content());
                 @SuppressWarnings("unchecked")
                 Map<String, Object> inferred = objectMapper.readValue(extractJson(raw), Map.class);
-                Map<String, Object> merged = new LinkedHashMap<>(inferred);
-                state.getRequest().forEach((key, value) -> {
-                    if (value == null || value instanceof String text && text.isBlank()) return;
-                    if (value instanceof Map<?, ?> map && map.isEmpty()) return;
-                    if (value instanceof List<?> list && list.isEmpty()) return;
-                    merged.put(key, value);
-                });
-                Map<String, Object> mergedConstraints = new LinkedHashMap<>();
-                if (inferred.get("constraints") instanceof Map<?, ?> values)
-                    values.forEach((key, value) -> mergedConstraints.put(String.valueOf(key), value));
-                if (state.getRequest().get("constraints") instanceof Map<?, ?> values)
-                    values.forEach((key, value) -> mergedConstraints.put(String.valueOf(key), value));
-                if (!mergedConstraints.isEmpty()) merged.put("constraints", mergedConstraints);
-                extractionInput = merged;
+                mergeMeaningful(extractionInput, inferred);
+                // 显式 API 字段优先于模型推断；空集合和 null 不会覆盖上一版约束。
+                mergeMeaningful(extractionInput, state.getRequest());
+                extractionInput.put("prompt", promptText);
+                extractionInput.put("modificationMode", modifying);
                 TravelConstraintSpec spec = constraintExtractor.extract(extractionInput);
-                return NodeExecutionResult.builder().data(Map.of("constraintSpec", spec))
+                return NodeExecutionResult.builder().data(Map.of(
+                                "constraintSpec", spec,
+                                "constraintChangeSet", modifying ? inferred : Map.of()))
                         .modelCalls(1).estimatedTokens(estimateTokens(extractionPrompt, raw)).build();
             } catch (Exception ignored) {
                 // 模型结构化失败时使用确定性解析；不会把任意模型文本交给执行器。
@@ -219,6 +246,53 @@ public class TravelWorkflowNodeCatalog {
         TravelConstraintSpec spec = constraintExtractor.extract(extractionInput);
         return NodeExecutionResult.builder().data(Map.of("constraintSpec", spec))
                 .warnings(promptText.isBlank() ? List.of() : List.of("约束模型抽取失败，已使用确定性字段解析兜底")).build();
+    }
+
+    private Map<String, Object> baseConstraintInput(WorkflowState state) {
+        Object rawPlan = state.getData().get("basePlan");
+        if (!(rawPlan instanceof Map<?, ?> plan) || plan.get("constraintSpec") == null) return new LinkedHashMap<>();
+        TravelConstraintSpec base = objectMapper.convertValue(plan.get("constraintSpec"), TravelConstraintSpec.class);
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("origin", base.origin());
+        values.put("destination", base.destination());
+        if (base.startDate() != null) values.put("startDate", base.startDate().toString());
+        values.put("days", base.days());
+        values.put("travelers", base.travelers());
+        if (base.maxBudgetCents() != null) values.put("budget", base.maxBudgetCents() / 100D);
+        Map<String, Object> constraints = new LinkedHashMap<>(base.hardConstraints());
+        constraints.put("currency", base.currency());
+        constraints.put("allowedTransportModes", base.allowedTransportModes());
+        constraints.put("requiredAttractionTags", base.requiredAttractionTags());
+        constraints.put("requiredCuisineTags", base.requiredCuisineTags());
+        if (base.hotelMaxNightlyCents() != null)
+            constraints.put("hotelMaxNightly", base.hotelMaxNightlyCents() / 100D);
+        constraints.put("softPreferences", base.softPreferences());
+        values.put("constraints", constraints);
+        return values;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mergeMeaningful(Map<String, Object> target, Map<?, ?> source) {
+        source.forEach((rawKey, value) -> {
+            if (rawKey == null || value == null || value instanceof String text && text.isBlank()) return;
+            if (value instanceof List<?> list && list.isEmpty()) return;
+            String key = String.valueOf(rawKey);
+            if (value instanceof Map<?, ?> incoming) {
+                if (incoming.isEmpty()) return;
+                Map<String, Object> nested = target.get(key) instanceof Map<?, ?> existing
+                        ? new LinkedHashMap<>((Map<String, Object>) existing) : new LinkedHashMap<>();
+                mergeMeaningful(nested, incoming);
+                target.put(key, nested);
+                return;
+            }
+            target.put(key, value);
+        });
+    }
+
+    private String baseItinerary(WorkflowState state) {
+        Object rawPlan = state.getData().get("basePlan");
+        String itinerary = rawPlan instanceof Map<?, ?> plan ? Objects.toString(plan.get("itinerary"), "") : "";
+        return itinerary.length() <= 3000 ? itinerary : itinerary.substring(0, 3000) + "…";
     }
 
     private NodeExecutionResult validateConstraints(WorkflowState state) {
@@ -328,9 +402,20 @@ public class TravelWorkflowNodeCatalog {
             briefing.put("旅行要求", constraintBrief(value(state, "constraintSpec", TravelConstraintSpec.class)));
             briefing.put("排定结果", solutionBrief(value(state, "solverResult", TravelSolverResult.class)));
             briefing.put("目的地参考资料", state.getData().getOrDefault("knowledgeEvidence", List.of()));
+            boolean modifying = Boolean.TRUE.equals(state.getData().get("modificationMode"));
+            if (modifying) {
+                briefing.put("上一版完整行程", baseItinerary(state));
+                briefing.put("本次修改要求", state.getData().get("changeRequest"));
+                briefing.put("结构化约束变更", state.getData().getOrDefault("constraintChangeSet", Map.of()));
+            }
             String context = objectMapper.writeValueAsString(briefing);
-            String prompt = """
+            String prompt = (modifying ? """
+                    请在“上一版完整行程”的基础上执行“本次修改要求”，输出修改后的完整行程。
+                    没有被用户点名修改的日期、活动和偏好应尽量保持不变；发生连带时间或预算冲突时才做最小必要调整，并简短说明。
+                    修改后的内容必须服从最新的“旅行要求”和“排定结果”，不能保留已经被替换或删除的项目。
+                    """ : """
                     请只依据以下已核对过的材料，生成可直接执行的中文旅行方案。
+                    """) + """
                     必须逐日列出时间、地点、活动和费用；不得替换材料中已选定的项目，不得虚构库存、价格或余票。
                     若"排定结果.实时数据限制"不为空，请在开头用一到两句自然的话提醒用户这类信息暂时查不到、方案仅供参考；为空时不要提及任何数据限制。
                     全程使用普通用户能读懂的自然语言：不得出现字段名、JSON、代码、英文标识、错误码、类名或求解器名称，也不要复述本要求。

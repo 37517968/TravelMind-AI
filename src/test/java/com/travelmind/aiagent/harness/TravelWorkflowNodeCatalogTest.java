@@ -86,6 +86,46 @@ class TravelWorkflowNodeCatalogTest {
     }
 
     @Test
+    void modificationShouldLoadBaseAndOnlyOverrideChangedConstraint() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog("{\"budget\":5000}");
+        Map<String, Object> baseSpec = new java.util.LinkedHashMap<>();
+        baseSpec.put("origin", "上海");
+        baseSpec.put("destination", "北京");
+        baseSpec.put("startDate", null);
+        baseSpec.put("days", 4);
+        baseSpec.put("travelers", 2);
+        baseSpec.put("maxBudgetCents", 300000L);
+        baseSpec.put("currency", "CNY");
+        baseSpec.put("allowedTransportModes", List.of("TRAIN"));
+        baseSpec.put("requiredAttractionTags", List.of("历史"));
+        baseSpec.put("requiredCuisineTags", List.of());
+        baseSpec.put("hotelMaxNightlyCents", null);
+        baseSpec.put("hardConstraints", Map.of());
+        baseSpec.put("softPreferences", Map.of());
+        baseSpec.put("supplementalVersion", 0);
+        Map<String, Object> request = new java.util.LinkedHashMap<>();
+        request.put("taskType", "MODIFY");
+        request.put("prompt", "预算改成5000，其他不变");
+        request.put("baseTaskId", 9L);
+        request.put("basePlanSnapshot", Map.of("itinerary", "第一天故宫，第二天颐和园。".repeat(10),
+                "constraintSpec", baseSpec));
+        WorkflowState state = new WorkflowState(9L, request);
+
+        NodeExecutionResult intent = catalog.fixedNode(TravelPlanningGraphFactory.INTENT, state).execute(state);
+        assertThat(intent.getData()).containsEntry("workflowRoute", "MODIFY");
+        state.merge(intent.getData());
+        NodeExecutionResult base = catalog.fixedNode(TravelPlanningGraphFactory.BASE_PLAN, state).execute(state);
+        state.merge(base.getData());
+        NodeExecutionResult extraction = catalog.fixedNode(TravelPlanningGraphFactory.EXTRACT, state).execute(state);
+
+        var spec = (com.travelmind.aiagent.planning.model.TravelConstraintSpec) extraction.getData().get("constraintSpec");
+        assertThat(spec.destination()).isEqualTo("北京");
+        assertThat(spec.days()).isEqualTo(4);
+        assertThat(spec.travelers()).isEqualTo(2);
+        assertThat(spec.maxBudgetCents()).isEqualTo(500000L);
+    }
+
+    @Test
     void nodeResultShouldBeCheckpointRoundTripSafe() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         NodeExecutionResult original = NodeExecutionResult.builder()

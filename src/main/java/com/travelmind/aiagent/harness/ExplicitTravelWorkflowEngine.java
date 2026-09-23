@@ -67,7 +67,9 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             boolean chitchat = "CHAT".equals(Objects.toString(state.getData().get("responseType"), ""));
             String answer = Objects.toString(state.getData().get(chitchat ? "chatReply" : "itinerary"), "");
             Map<String, Object> resultPayload = new LinkedHashMap<>();
-            resultPayload.put("responseType", chitchat ? "CHAT" : "PLAN");
+            boolean modified = Boolean.TRUE.equals(state.getData().get("modificationMode"));
+            resultPayload.put("responseType", chitchat ? "CHAT" : modified ? "MODIFY" : "PLAN");
+            if (modified) resultPayload.put("baseTaskId", state.getData().get("baseTaskId"));
             // 闲聊回复同样通过既有的 itinerary 字段返回，前端与对外协议无需改动。
             resultPayload.put("itinerary", answer);
             resultPayload.put("constraintSpec", state.getData().get("constraintSpec"));
@@ -194,9 +196,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
      */
     private void restartForNewPlan(Long taskId, WorkflowState state, NodeExecutionResult intentResult) {
         if (!Boolean.TRUE.equals(intentResult.getData().get("newPlan"))) return;
-        if (TravelIntentRouter.awaitingClarification(state.getRequest())) {
-            TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
-        }
+        TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
         state.retainOnly(intentResult.getData());
         log.info("Task {} restarts travel planning on a new request at supplemental version {}", taskId,
                 state.getRequest().get("_supplementalVersion"));
@@ -253,6 +253,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
 
     private int progress(String nodeId) {
         if (nodeId.startsWith(TravelPlanningGraphFactory.INTENT)) return 5;
+        if (nodeId.startsWith(TravelPlanningGraphFactory.BASE_PLAN)) return 7;
         if (nodeId.startsWith(TravelPlanningGraphFactory.EXTRACT)) return 8;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CHECK)) return 14;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CONTEXT)) return 25;

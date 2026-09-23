@@ -49,6 +49,25 @@ class TravelPlanningGraphFactoryTest {
     }
 
     @Test
+    void modificationShouldLoadBasePlanBeforeExtractingChangedConstraints() {
+        List<String> visited = new ArrayList<>();
+        var graph = new TravelPlanningGraphFactory().compile(node -> {
+            visited.add(node);
+            return switch (node) {
+                case TravelPlanningGraphFactory.INTENT -> Map.of("route", "MODIFY");
+                case TravelPlanningGraphFactory.BASE_PLAN, TravelPlanningGraphFactory.CHECK -> Map.of("route", "CONTINUE");
+                case TravelPlanningGraphFactory.SOLVE -> Map.of("route", "UNSAT");
+                default -> Map.of("route", "CONTINUE");
+            };
+        });
+
+        graph.invoke(Map.of(), RunnableConfig.builder().threadId("modify-case").build());
+
+        assertThat(visited).startsWith(TravelPlanningGraphFactory.INTENT, TravelPlanningGraphFactory.BASE_PLAN,
+                TravelPlanningGraphFactory.EXTRACT).contains(TravelPlanningGraphFactory.RELAX);
+    }
+
+    @Test
     void unsatRequestShouldRouteToRelaxationAndStopBeforeGeneration() {
         List<String> visited = new ArrayList<>();
         var graph = new TravelPlanningGraphFactory().compile(node -> {

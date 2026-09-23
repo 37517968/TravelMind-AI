@@ -24,7 +24,9 @@ HTTP 提交只创建任务并返回 `202 + taskId`，不等待天气、POI、RAG
 ```mermaid
 flowchart TD
     I[INTENT_ROUTING\nLLM 意图判定] -->|CHAT| K[CHAT_REPLY 流式回复] --> Z([SUCCEEDED])
-    I -->|CONTINUE / NEW_PLAN| A[CONSTRAINT_EXTRACTION]
+    I -->|CREATE_PLAN / SUPPLEMENT / NEW_PLAN| A[CONSTRAINT_EXTRACTION]
+    I -->|MODIFY_PLAN| L[BASE_PLAN_LOADING\n加载上一成功计划快照]
+    L --> A
     A --> B[CONSTRAINT_VALIDATION]
     B -->|缺少目的地/预算| W[WAITING_USER]
     W -->|resume + supplemental| A
@@ -42,6 +44,8 @@ flowchart TD
 ```
 
 `TravelPlanningGraphFactory` 使用 Spring AI Alibaba `StateGraph / OverAllState / CompiledGraph` 声明固定节点和条件边。LLM 不再决定下一跳：它只把自然语言抽取为白名单 `TravelConstraintSpec`，以及把已经通过求解和校验的结构化方案表述为行程文本。候选 POI、住宿、餐厅、路线和知识证据在对应固定节点内按约束需要调用，所有外部调用仍经过 ToolGateway 或 Hybrid RAG。
+
+意图层将输入分为 `CHAT / CREATE_PLAN / SUPPLEMENT / MODIFY_PLAN / NEW_PLAN`。修改已有行程不能只依赖截断后的对话文本：前端携带当前展示计划的 `baseTaskId`，后端校验归属并把上一版 `result_json` 固化为 `basePlanSnapshot`；修改分支先加载基线，再将本轮要求按 patch 语义合并到旧约束并完整重算。
 
 节点按照 `task_id + logical_node + supplemental_version + attempt` 写 MySQL 检查点。用户恢复任务时只合并旅行约束/偏好，执行预算、任务身份和幂等字段不可修改；补充版本递增后重新抽取约束并重跑受影响节点，不重置模型调用、Token 或节点执行计数。`acceptedRelaxation` 可携带系统给出的最小放宽参数。
 
