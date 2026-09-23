@@ -54,6 +54,11 @@ spring:
     connection-timeout: 3s
     socket-timeout: 10s
   ai:
+    # 类路径同时存在 DashScope 与 Ollama 两个 ChatModel，不显式选择就会因按类型注入歧义启动失败
+    # （No qualifying bean of type ChatModel: found 2）。业务代码按名字依赖 dashscopeChatModel，这里锁定 provider；
+    # 需要临时改用本地 Ollama 时设置环境变量 CHAT_MODEL=ollama。
+    model:
+      chat: ${CHAT_MODEL:dashscope}
     # 默认不把 Prompt、Completion 和检索正文写入 Observation/Trace。
     chat:
       observations:
