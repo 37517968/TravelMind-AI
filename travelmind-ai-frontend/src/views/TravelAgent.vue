@@ -121,7 +121,6 @@ const beginAssistantResponse = () => {
   answerMessageIndex = -1
   const message = assistantMessage()
   message.generating = true
-  message.steps.push({ key: 'client:generating', text: 'Generating...', state: 'running' })
   return message
 }
 

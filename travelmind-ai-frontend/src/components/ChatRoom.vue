@@ -11,6 +11,11 @@
             <AiAvatarFallback :type="aiType" />
           </div>
           <div class="message-bubble">
+            <div v-if="msg.generating" class="generating-status" role="status" aria-live="polite">
+              <span class="generating-orbit" aria-hidden="true"></span>
+              <span>Generating</span>
+              <span class="generating-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
             <!-- 模型思考与工具调用过程用小字灰度展示，不与正式回复混在一起 -->
             <div v-if="msg.steps && msg.steps.length" class="message-steps">
               <div class="step-summary-row">
@@ -271,6 +276,48 @@ onMounted(() => {
   font-size: 16px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.generating-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: #53657d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.generating-orbit {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #c8d3e3;
+  border-top-color: #4f78d1;
+  border-radius: 50%;
+  animation: generating-spin .8s linear infinite;
+}
+
+.generating-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.generating-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: generating-pulse 1.2s infinite ease-in-out;
+}
+
+.generating-dots i:nth-child(2) { animation-delay: .16s; }
+.generating-dots i:nth-child(3) { animation-delay: .32s; }
+
+@keyframes generating-spin { to { transform: rotate(360deg); } }
+@keyframes generating-pulse {
+  0%, 70%, 100% { opacity: .25; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
 }
 
 /* 思考/工具调用过程：小字灰度，避免与正式回复抢视觉重点 */
