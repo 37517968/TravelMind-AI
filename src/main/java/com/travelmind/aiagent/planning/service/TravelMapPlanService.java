@@ -27,7 +27,7 @@ public class TravelMapPlanService {
     private static final Map<String, String> ROUTE_TOOLS = Map.of(
             "DRIVING", "amap_maps_direction_driving",
             "WALKING", "amap_maps_direction_walking",
-            "BICYCLING", "amap_maps_bicycling",
+            "BICYCLING", "amap_maps_direction_bicycling",
             "TRANSIT", "amap_maps_direction_transit_integrated");
 
     private final ObjectProvider<TravelToolFacade> tools;
@@ -58,8 +58,11 @@ public class TravelMapPlanService {
             ResolvedPoi poi = resolvePoi(facade, candidate, taskId, userId);
             if (poi != null) pois.add(poi);
         }
+        // 没有选中地点与实时地点服务未接入是两件事，提示需要区分开。
         if (pois.isEmpty()) return TravelMapPlan.unavailable(spec.destination(),
-                "高德 MCP 未返回可定位的 POI，文本行程仍可正常使用");
+                facade == null || !facade.hasTool(DETAIL)
+                        ? "实时地点服务未接入，本轮只生成文本行程"
+                        : "方案里没有可定位的已选地点，本轮只生成文本行程");
         pois = nearestNeighborOrder(pois);
 
         String mode = routeMode(spec.allowedTransportModes());
