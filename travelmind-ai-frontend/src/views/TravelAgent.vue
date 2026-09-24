@@ -13,6 +13,7 @@
           :connection-status="connectionStatus"
           ai-type="travel"
           @send-message="sendMessage"
+          @change-route-mode="changeRouteMode"
         />
       </div>
       
@@ -151,7 +152,16 @@ const readFinalResult = async () => {
     if (message) message.content = text
     else addMessage(text, false, 'ai-final')
   }
+  if (parsedResult?.mapPlan?.available) {
+    if (message) message.mapPlan = parsedResult.mapPlan
+    else if (messages.value.length) messages.value[messages.value.length - 1].mapPlan = parsedResult.mapPlan
+  }
   return parsedResult
+}
+
+const changeRouteMode = mode => {
+  const labels = { TRANSIT: '公交', DRIVING: '驾车', WALKING: '步行', BICYCLING: '骑行' }
+  sendMessage(`请在当前旅行计划基础上，将市内景点之间的交通方式改为${labels[mode] || mode}，其他安排尽量不变。`)
 }
 
 const subscribeTask = (taskId) => {

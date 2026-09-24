@@ -74,8 +74,13 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
     /** 未指定必玩类型时按天数挑最便宜的景点；工具失败导致候选全部未确认时，仍降级选材并记录缺口。 */
     private void chooseAttractions(TravelConstraintSpec spec, TravelCandidateSet set, List<TravelCandidate> selected,
                                    Set<String> gaps) {
-        if (!spec.requiredAttractionTags().isEmpty()) return;
-        List<TravelCandidate> picks = set.attractions().stream().sorted(byCost()).limit(Math.max(1, spec.days())).toList();
+        long alreadySelected = selected.stream()
+                .filter(item -> item.type() == TravelCandidate.CandidateType.ATTRACTION).count();
+        long remaining = Math.max(0, spec.days() * 3L - alreadySelected);
+        if (remaining == 0) return;
+        // 地图行程默认每天最多三个景点；路线节点会再按日期分组并逐段算路。
+        List<TravelCandidate> picks = set.attractions().stream().filter(item -> !selected.contains(item))
+                .sorted(byCost()).limit(remaining).toList();
         if (picks.isEmpty()) {
             gaps.add("attraction_availability");
             return;

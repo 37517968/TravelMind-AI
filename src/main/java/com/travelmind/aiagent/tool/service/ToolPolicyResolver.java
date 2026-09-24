@@ -9,7 +9,8 @@ import java.util.Set;
 
 @Component
 public class ToolPolicyResolver {
-    private static final Set<String> GENERAL = Set.of("CHAT", "WEATHER_QUERY", "POI_QUERY", "ROUTE_OPTIMIZATION");
+    private static final Set<String> GENERAL = Set.of("CHAT", "WEATHER_QUERY", "POI_QUERY",
+            "ROUTE_OPTIMIZATION", "CANDIDATE_RETRIEVAL", "MAP_PLANNING");
 
     public ToolPolicy resolve(String name, String source) {
         if (name == null) throw new IllegalArgumentException("tool name is required");
@@ -27,7 +28,7 @@ public class ToolPolicyResolver {
                     Duration.ZERO, Duration.ofSeconds(8), 1, 1000, Set.of(), 0);
         if ("MCP".equals(source))
             return new ToolPolicy(name, source, ToolRiskLevel.COSTED, true, true,
-                    Duration.ofMinutes(5), Duration.ofSeconds(10), 2, 6000, GENERAL, 0.005);
+                    Duration.ofMinutes(5), Duration.ofSeconds(10), 2, 60000, GENERAL, 0.005);
         return read(name, source, Duration.ofMinutes(5), Duration.ofSeconds(6), 1, 0);
     }
 

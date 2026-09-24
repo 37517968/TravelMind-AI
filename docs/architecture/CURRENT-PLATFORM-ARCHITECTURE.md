@@ -174,7 +174,8 @@ sequenceDiagram
     else 约束完整
         H->>G: CONTEXT_BUILDING，Hybrid RAG 获取证据
         H->>G: CANDIDATE_RETRIEVAL，经 ToolGateway 获取类型化候选
-        H->>P: CONSTRAINT_SOLVING，Z3 或 JVM Solver
+    H->>P: CONSTRAINT_SOLVING，Z3 或 JVM Solver
+    H->>G: MAP_PLANNING，POI 详情与相邻景点分段路线
         alt UNSAT / UNKNOWN
             P->>DB: 保存 UNSAT core 和最小放宽建议，WAITING_USER
         else SAT
@@ -326,7 +327,7 @@ System Policy
 ```json
 {
   "request": "任务请求、硬约束、软偏好、执行预算",
-  "data": "constraintSpec、knowledgeEvidence、candidateSet、solverResult、validationResult、itinerary",
+  "data": "constraintSpec、knowledgeEvidence、candidateSet、solverResult、mapPlan、validationResult、itinerary",
   "metrics": "各节点耗时"
 }
 ```

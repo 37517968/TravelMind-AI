@@ -27,7 +27,8 @@ flowchart TD
     CANDIDATES --> SOLVER{CONSTRAINT_SOLVING\nZ3 SMT / JVM fallback}
     SOLVER -->|UNSAT| RELAX[UNSAT core + minimal relaxation]
     RELAX --> WAIT
-    SOLVER -->|SAT| GEN[ITINERARY_GENERATION\nLLM stream -> Redis Stream -> SSE]
+    SOLVER -->|SAT| MAP[MAP_PLANNING\nPOI详情 + 分段路线 + mapPlan]
+    MAP --> GEN[ITINERARY_GENERATION\nLLM stream -> Redis Stream -> SSE]
     GEN --> VALIDATE{DETERMINISTIC_VALIDATION}
     VALIDATE -->|invalid| RELAX
     VALIDATE -->|valid| FRESH{FRESHNESS_RECHECK}

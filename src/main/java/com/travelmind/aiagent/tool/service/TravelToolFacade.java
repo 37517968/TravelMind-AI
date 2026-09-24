@@ -26,14 +26,6 @@ public class TravelToolFacade {
         this.objectMapper = objectMapper;
     }
 
-    public String weatherForecast(String destination, String requestId, String userId) {
-        return call("getWeatherForecast", Map.of("cityName", destination), "WEATHER_QUERY", requestId, userId);
-    }
-
-    public String attractions(String city, String keyword, String requestId, String userId) {
-        return call("searchAttractions", Map.of("city", city, "keyword", keyword), "POI_QUERY", requestId, userId);
-    }
-
     public List<Map<String, Object>> describeTools() {
         return callbacks.values().stream().map(callback -> {
             Map<String, Object> description = new LinkedHashMap<>();
@@ -42,6 +34,10 @@ public class TravelToolFacade {
             description.put("inputSchema", callback.getToolDefinition().inputSchema());
             return description;
         }).toList();
+    }
+
+    public boolean hasTool(String toolName) {
+        return callbacks.containsKey(toolName);
     }
 
     public String invoke(String toolName, Map<String, Object> arguments, String node,

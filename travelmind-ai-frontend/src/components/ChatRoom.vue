@@ -24,6 +24,8 @@
               </div>
             </div>
             <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <TravelMapCard v-if="msg.mapPlan?.available" :map-plan="msg.mapPlan"
+                           @change-mode="mode => emit('change-route-mode', mode)" />
             <span v-if="showTyping(index)" class="typing-indicator">▋</span>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
@@ -65,6 +67,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import TravelMapCard from './TravelMapCard.vue'
 import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps({
@@ -82,7 +85,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['send-message'])
+const emit = defineEmits(['send-message', 'change-route-mode'])
 
 const inputMessage = ref('')
 const messagesContainer = ref(null)
@@ -545,4 +548,4 @@ onMounted(() => {
 .ai-message + .ai-message .message-bubble {
   border-top-left-radius: 10px;
 }
-</style> 
+</style>

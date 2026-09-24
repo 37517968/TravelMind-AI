@@ -4,6 +4,8 @@ import com.travelmind.aiagent.tool.service.McpSchemaRegistryService;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.spec.McpClientTransport;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +17,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpRequest;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,12 +53,11 @@ public class RemoteMcpClientManager {
         try {
             validateServerConfiguration(name, config);
             HttpRequest.Builder request = HttpRequest.newBuilder()
-                    .header(config.getAuthHeader(), authValue(config))
                     .header("X-MCP-Schema-Version", config.getSchemaVersion());
-            var transport = HttpClientSseClientTransport.builder(config.getUrl())
-                    .sseEndpoint(config.getSseEndpoint())
-                    .requestBuilder(request)
-                    .build();
+            if (blank(config.getAuthQueryParameter())) {
+                request.header(config.getAuthHeader(), authValue(config));
+            }
+            McpClientTransport transport = createTransport(config, request);
             client = McpClient.sync(transport).requestTimeout(config.getTimeout()).build();
             var initialized = client.initialize();
             String actualVersion = initialized.serverInfo().version();
@@ -76,9 +79,30 @@ public class RemoteMcpClientManager {
             log.info("Remote MCP connected: server={}, version={}, allowedTools={}", name, actualVersion, discovered.length);
         } catch (Exception failure) {
             if (client != null) try { client.closeGracefully(); } catch (Exception ignored) { }
-            log.warn("Remote MCP unavailable: server={}, reason={}", name, failure.getMessage());
+            log.warn("Remote MCP unavailable: server={}, reason={}", name, safeFailure(config, failure));
             if (config.isRequired()) throw new IllegalStateException("Required MCP server unavailable: " + name, failure);
         }
+    }
+
+    private McpClientTransport createTransport(RemoteMcpProperties.Server config, HttpRequest.Builder request) {
+        if (config.getTransport() == RemoteMcpProperties.Transport.STREAMABLE_HTTP) {
+            return HttpClientStreamableHttpTransport.builder(config.getUrl())
+                    .endpoint(authenticatedEndpoint(config.getEndpoint(), config))
+                    .requestBuilder(request)
+                    .connectTimeout(config.getTimeout())
+                    .build();
+        }
+        return HttpClientSseClientTransport.builder(config.getUrl())
+                .sseEndpoint(authenticatedEndpoint(config.getSseEndpoint(), config))
+                .requestBuilder(request)
+                .build();
+    }
+
+    private String authenticatedEndpoint(String endpoint, RemoteMcpProperties.Server config) {
+        if (blank(config.getAuthQueryParameter())) return endpoint;
+        String separator = endpoint.contains("?") ? "&" : "?";
+        return endpoint + separator + URLEncoder.encode(config.getAuthQueryParameter(), StandardCharsets.UTF_8)
+                + "=" + URLEncoder.encode(config.getToken(), StandardCharsets.UTF_8);
     }
 
     static void validateServerConfiguration(String name, RemoteMcpProperties.Server config) {
@@ -95,10 +119,12 @@ public class RemoteMcpClientManager {
         }
         if (!"https".equalsIgnoreCase(uri.getScheme()) || blankStatic(uri.getHost()) || uri.getUserInfo() != null)
             throw new IllegalArgumentException("remote MCP url must be an HTTPS origin without user-info");
-        if (blankStatic(config.getAuthHeader()))
+        if (config.getTransport() == null)
+            throw new IllegalArgumentException("remote MCP transport is required");
+        if (blankStatic(config.getAuthQueryParameter()) && blankStatic(config.getAuthHeader()))
             throw new IllegalArgumentException("remote MCP auth-header is required");
-        if (blankStatic(config.getExpectedServerVersion()))
-            throw new IllegalArgumentException("remote MCP expected-server-version is required");
+        if (!blankStatic(config.getAuthQueryParameter()) && !SAFE_NAME.matcher(config.getAuthQueryParameter()).matches())
+            throw new IllegalArgumentException("remote MCP auth-query-parameter is invalid");
         if (blankStatic(config.getSchemaVersion()))
             throw new IllegalArgumentException("remote MCP schema-version is required");
         if (config.getAllowedTools() == null || config.getAllowedTools().isEmpty()
@@ -106,12 +132,20 @@ public class RemoteMcpClientManager {
             throw new IllegalArgumentException("remote MCP allowed-tools must contain explicit valid tool names");
         if (config.getTimeout() == null || config.getTimeout().isZero() || config.getTimeout().isNegative())
             throw new IllegalArgumentException("remote MCP timeout must be positive");
-        if (blankStatic(config.getSseEndpoint()) || !config.getSseEndpoint().startsWith("/"))
-            throw new IllegalArgumentException("remote MCP sse-endpoint must be an absolute path");
+        String endpoint = config.getTransport() == RemoteMcpProperties.Transport.STREAMABLE_HTTP
+                ? config.getEndpoint() : config.getSseEndpoint();
+        if (blankStatic(endpoint) || !endpoint.startsWith("/"))
+            throw new IllegalArgumentException("remote MCP endpoint must be an absolute path");
     }
 
     private String authValue(RemoteMcpProperties.Server config) {
         return blank(config.getAuthScheme()) ? config.getToken() : config.getAuthScheme() + " " + config.getToken();
+    }
+
+    private String safeFailure(RemoteMcpProperties.Server config, Exception failure) {
+        String message = failure.getMessage();
+        if (message == null) return failure.getClass().getSimpleName();
+        return blank(config.getToken()) ? message : message.replace(config.getToken(), "[REDACTED]");
     }
 
     private boolean blank(String value) { return value == null || value.isBlank(); }

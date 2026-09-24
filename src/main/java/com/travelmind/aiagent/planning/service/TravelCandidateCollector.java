@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,18 +24,22 @@ import java.util.UUID;
 @Component
 public class TravelCandidateCollector {
     private static final String RETRIEVAL_NODE = "CANDIDATE_RETRIEVAL";
+    private static final String AMAP_TEXT_SEARCH = "amap_maps_text_search";
+    private static final String AMAP_AROUND_SEARCH = "amap_maps_around_search";
     private static final Map<String, String> TOOL_LABELS = Map.of(
-            "searchHotels", "住宿", "searchAttractions", "景点", "searchRestaurants", "餐厅");
+            AMAP_TEXT_SEARCH, "高德地点", AMAP_AROUND_SEARCH, "高德周边地点");
 
     private final ObjectProvider<TravelToolFacade> tools;
     private final ObjectMapper objectMapper;
     private final AgentProgressEventStore eventStore;
+    private final AmapPayloadParser amap;
 
     public TravelCandidateCollector(ObjectProvider<TravelToolFacade> tools, ObjectMapper objectMapper,
                                     AgentProgressEventStore eventStore) {
         this.tools = tools;
         this.objectMapper = objectMapper;
         this.eventStore = eventStore;
+        this.amap = new AmapPayloadParser(objectMapper);
     }
 
     public TravelCandidateSet collect(Long taskId, String userId, TravelConstraintSpec spec) {
@@ -44,11 +49,14 @@ public class TravelCandidateCollector {
         Instant now = Instant.now();
         TravelToolFacade facade = tools.getIfAvailable();
         if (spec.destination().isBlank()) return new TravelCandidateSet(List.of(), List.of(), List.of(), List.of(), now);
-        ToolResult hotels = invoke(facade, "searchHotels", Map.of("city", spec.destination(), "keyword", ""), taskId, userId);
-        ToolResult attractions = invoke(facade, "searchAttractions",
-                Map.of("city", spec.destination(), "keyword", String.join(" ", spec.requiredAttractionTags())), taskId, userId);
-        ToolResult restaurants = invoke(facade, "searchRestaurants",
-                Map.of("city", spec.destination(), "cuisineType", String.join(" ", spec.requiredCuisineTags())), taskId, userId);
+        ToolResult hotels = searchPoi(facade, spec.destination(), "酒店", taskId, userId);
+        String attractionKeyword = spec.requiredAttractionTags().isEmpty()
+                ? "景点" : String.join(" ", spec.requiredAttractionTags());
+        ToolResult attractions = searchPoi(facade, spec.destination(), attractionKeyword, taskId, userId);
+        ToolResult nearbyAttractions = nearbyPoi(facade, attractions, attractionKeyword, taskId, userId);
+        String restaurantKeyword = spec.requiredCuisineTags().isEmpty()
+                ? "美食" : String.join(" ", spec.requiredCuisineTags());
+        ToolResult restaurants = searchPoi(facade, spec.destination(), restaurantKeyword, taskId, userId);
 
         List<TravelCandidate> transportList = spec.origin().isBlank() ? List.of() : List.of(candidate(
                 TravelCandidate.CandidateType.TRANSPORT, spec.origin() + "至" + spec.destination(), 30000,
@@ -56,13 +64,31 @@ public class TravelCandidateCollector {
                 Map.of("mode", defaultMode(spec), "priceConfidence", "ESTIMATED")));
         List<TravelCandidate> hotelList = toolCandidates(hotels, TravelCandidate.CandidateType.HOTEL,
                 spec.destination() + "住宿候选", 40000, List.of("住宿"), spec.travelers(), now);
-        List<TravelCandidate> attractionList = toolCandidates(attractions, TravelCandidate.CandidateType.ATTRACTION,
+        List<TravelCandidate> attractionList = mergeCandidates(
+                toolCandidates(attractions, TravelCandidate.CandidateType.ATTRACTION,
                 spec.destination() + "景点候选", 8000,
-                spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now);
+                        spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now),
+                amap.pois(nearbyAttractions).isEmpty() ? List.of() : toolCandidates(nearbyAttractions, TravelCandidate.CandidateType.ATTRACTION,
+                        spec.destination() + "周边景点候选", 8000,
+                        spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now));
         List<TravelCandidate> restaurantList = toolCandidates(restaurants, TravelCandidate.CandidateType.RESTAURANT,
                 spec.destination() + "餐厅候选", 6000,
                 spec.requiredCuisineTags().isEmpty() ? List.of("本地美食") : spec.requiredCuisineTags(), 0, now);
         return new TravelCandidateSet(transportList, hotelList, attractionList, restaurantList, now);
+    }
+
+    private ToolResult searchPoi(TravelToolFacade facade, String city, String keyword, Long taskId, String userId) {
+        if (facade == null || !facade.hasTool(AMAP_TEXT_SEARCH)) return unavailable(AMAP_TEXT_SEARCH);
+        return invoke(facade, AMAP_TEXT_SEARCH, Map.of("keywords", keyword, "city", city), taskId, userId);
+    }
+
+    private ToolResult nearbyPoi(TravelToolFacade facade, ToolResult seed, String keyword, Long taskId, String userId) {
+        if (facade == null || !facade.hasTool(AMAP_AROUND_SEARCH)) return unavailable(AMAP_AROUND_SEARCH);
+        String location = amap.pois(seed).stream().findFirst()
+                .map(poi -> poi.location().lng() + "," + poi.location().lat()).orElse("");
+        if (location.isBlank()) return unavailable(AMAP_AROUND_SEARCH);
+        return invoke(facade, AMAP_AROUND_SEARCH,
+                Map.of("keywords", keyword, "location", location, "radius", 5000), taskId, userId);
     }
 
     private TravelCandidateSet suppliedCandidates(Map<String, Object> constraints) {
@@ -99,6 +125,22 @@ public class TravelCandidateCollector {
         List<TravelCandidate> values = new ArrayList<>();
         Instant observed = result.observedAt() == null ? now : result.observedAt();
         Instant expires = result.expiresAt() == null ? now.plus(15, ChronoUnit.MINUTES) : result.expiresAt();
+        List<AmapPayloadParser.Poi> pois = amap.pois(result);
+        for (AmapPayloadParser.Poi poi : pois) {
+            Map<String, Object> attributes = new LinkedHashMap<>();
+            attributes.put("priceConfidence", "ESTIMATED");
+            attributes.put("toolSuccess", true);
+            attributes.put("poiId", poi.id());
+            attributes.put("address", poi.address());
+            attributes.put("poiType", poi.type());
+            attributes.put("location", poi.location());
+            attributes.put("photos", poi.photos());
+            values.add(new TravelCandidate(poi.id(), type, poi.name(), poi.city(), estimatedCost,
+                    type == TravelCandidate.CandidateType.HOTEL ? 24 * 60 : 120,
+                    capacity, tags, true, observed, expires,
+                    result.source() == null ? "AMAP_MCP" : result.source(), attributes));
+        }
+        if (!values.isEmpty()) return List.copyOf(values);
         Map<String, Object> attributes = Map.of(
                 "priceConfidence", "ESTIMATED",
                 "toolSuccess", result.success(),
@@ -110,6 +152,14 @@ public class TravelCandidateCollector {
                 base.durationMinutes(), base.capacity(), base.tags(), result.success(), base.observedAt(),
                 base.expiresAt(), base.source(), base.attributes()));
         return List.copyOf(values);
+    }
+
+    @SafeVarargs
+    private final List<TravelCandidate> mergeCandidates(List<TravelCandidate>... groups) {
+        Map<String, TravelCandidate> unique = new LinkedHashMap<>();
+        for (List<TravelCandidate> group : groups)
+            for (TravelCandidate candidate : group) unique.putIfAbsent(candidate.id(), candidate);
+        return List.copyOf(unique.values());
     }
 
     private TravelCandidate candidate(TravelCandidate.CandidateType type, String name, long cost, int capacity,

@@ -184,14 +184,6 @@ knife4j:
 search-api:
   api-key: ${SEARCH_API_KEY:your-search-api-key}
 
-# 高德地图 API
-amap:
-  api-key: ${AMAP_API_KEY:your-amap-api-key}
-
-# 和风天气 API
-qweather:
-  api-key: ${QWEATHER_API_KEY:your-qweather-api-key}
-
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   pattern:
@@ -248,8 +240,31 @@ travel:
     user-tool-qps: 5
   mcp:
     remote:
-      enabled: false
-      servers: {}
+      enabled: ${MCP_REMOTE_ENABLED:false}
+      servers:
+        # 高德官方托管 MCP。密钥仅从环境变量注入，不进入仓库和日志。
+        amap:
+          transport: STREAMABLE_HTTP
+          url: https://mcp.amap.com
+          endpoint: /mcp
+          auth-query-parameter: key
+          token: ${AMAP_MCP_API_KEY:}
+          timeout: ${AMAP_MCP_REQUEST_TIMEOUT:10s}
+          required: ${AMAP_MCP_REQUIRED:false}
+          schema-version: amap-2026-03
+          allowed-tools:
+            - maps_geo
+            - maps_regeocode
+            - maps_ip_location
+            - maps_text_search
+            - maps_around_search
+            - maps_search_detail
+            - maps_direction_driving
+            - maps_direction_walking
+            - maps_bicycling
+            - maps_direction_transit_integrated
+            - maps_distance
+            - maps_weather
   knowledge:
     embedding:
       # 向量维度：必须与 embedding 模型输出维度、PG 表 vector_store.embedding 列宽三者一致

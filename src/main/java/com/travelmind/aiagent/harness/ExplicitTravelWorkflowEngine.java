@@ -76,6 +76,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             resultPayload.put("itinerary", answer);
             resultPayload.put("constraintSpec", state.getData().get("constraintSpec"));
             resultPayload.put("solverResult", state.getData().get("solverResult"));
+            resultPayload.put("mapPlan", state.getData().get("mapPlan"));
             resultPayload.put("validationResult", state.getData().get("validationResult"));
             resultPayload.put("freshnessResult", state.getData().get("freshnessResult"));
             resultPayload.put("workflowVersion", task.getWorkflowVersion());

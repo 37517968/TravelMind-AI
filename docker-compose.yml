@@ -15,8 +15,10 @@ x-app-environment: &app-environment
   DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
   CHAT_MODEL: ${CHAT_MODEL:-dashscope}
   SEARCH_API_KEY: ${SEARCH_API_KEY:-}
-  AMAP_API_KEY: ${AMAP_API_KEY:-}
-  QWEATHER_API_KEY: ${QWEATHER_API_KEY:-}
+  MCP_REMOTE_ENABLED: ${MCP_REMOTE_ENABLED:-false}
+  AMAP_MCP_API_KEY: ${AMAP_MCP_API_KEY:-}
+  AMAP_MCP_REQUEST_TIMEOUT: ${AMAP_MCP_REQUEST_TIMEOUT:-10s}
+  AMAP_MCP_REQUIRED: ${AMAP_MCP_REQUIRED:-false}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
   OTEL_TRACES_SAMPLER_PROBABILITY: ${OTEL_TRACES_SAMPLER_PROBABILITY:-0.0}
@@ -138,6 +140,7 @@ services:
       APP_RUNTIME_ROLE: api
       APP_AGENT_WORKER_ENABLED: "false"
       APP_KNOWLEDGE_WORKER_ENABLED: "false"
+      MCP_REMOTE_ENABLED: "false"
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,redis
 
   agent-worker:
@@ -156,10 +159,15 @@ services:
       APP_RUNTIME_ROLE: knowledge-worker
       APP_AGENT_WORKER_ENABLED: "false"
       APP_KNOWLEDGE_WORKER_ENABLED: "true"
+      MCP_REMOTE_ENABLED: "false"
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,rabbit,elasticsearch
 
   frontend:
-    build: ./travelmind-ai-frontend
+    build:
+      context: ./travelmind-ai-frontend
+      args:
+        VITE_AMAP_JS_API_KEY: ${VITE_AMAP_JS_API_KEY:-}
+        VITE_AMAP_JS_SECURITY_CODE: ${VITE_AMAP_JS_SECURITY_CODE:-}
     restart: unless-stopped
     ports: ["80:80"]
     depends_on:

@@ -23,41 +23,17 @@ public class ToolRegistration {
     @Value("${search-api.api-key}")
     private String searchApiKey;
 
-    @Value("${amap.api-key:}")
-    private String amapApiKey;
-
-    @Value("${qweather.api-key:}")
-    private String qweatherApiKey;
-
     @Value("${travel.tools.high-risk-enabled:false}")
     private boolean highRiskEnabled;
 
-    @Bean
-    public WeatherTool weatherTool() {
-        return new WeatherTool(qweatherApiKey);
-    }
-
-    @Bean
-    public POISearchTool poiSearchTool() {
-        return new POISearchTool(amapApiKey);
-    }
-
-    @Bean
-    public RoutePlanningTool routePlanningTool() {
-        return new RoutePlanningTool(amapApiKey);
-    }
-
     @Bean("localGovernedTools")
-    public ToolCallback[] allTools(WeatherTool weatherTool, POISearchTool poiSearchTool,
-                                   RoutePlanningTool routePlanningTool, ToolGateway gateway,
-                                   ToolPolicyResolver policyResolver, ObjectMapper objectMapper,
+    public ToolCallback[] allTools(ToolGateway gateway, ToolPolicyResolver policyResolver, ObjectMapper objectMapper,
                                    RemoteMcpClientManager mcpManager, Environment environment) {
         WebSearchTool webSearchTool = new WebSearchTool(searchApiKey);
         boolean allowHighRisk = highRiskEnabled && !environment.acceptsProfiles(Profiles.of("prod"));
         ToolCallback[] raw = allowHighRisk
-                ? ToolCallbacks.from(webSearchTool, new WebScrapingTool(), new ResourceDownloadTool(),
-                        weatherTool, poiSearchTool, routePlanningTool)
-                : ToolCallbacks.from(webSearchTool, weatherTool, poiSearchTool, routePlanningTool);
+                ? ToolCallbacks.from(webSearchTool, new WebScrapingTool(), new ResourceDownloadTool())
+                : ToolCallbacks.from(webSearchTool);
         java.util.stream.Stream<ToolCallback> callbacks = java.util.stream.Stream.concat(
                 java.util.Arrays.stream(raw), java.util.Arrays.stream(mcpManager.callbacks()));
         return callbacks

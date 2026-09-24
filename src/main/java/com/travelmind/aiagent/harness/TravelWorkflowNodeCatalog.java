@@ -7,12 +7,14 @@ import com.travelmind.aiagent.planning.model.TravelCandidate;
 import com.travelmind.aiagent.planning.model.TravelCandidateSet;
 import com.travelmind.aiagent.planning.model.TravelConstraintSpec;
 import com.travelmind.aiagent.planning.model.TravelSolverResult;
+import com.travelmind.aiagent.planning.model.TravelMapPlan;
 import com.travelmind.aiagent.planning.model.TravelValidationResult;
 import com.travelmind.aiagent.planning.service.TravelCandidateCollector;
 import com.travelmind.aiagent.planning.service.TravelConstraintExtractor;
 import com.travelmind.aiagent.planning.service.TravelConstraintSolver;
 import com.travelmind.aiagent.planning.service.TravelFreshnessValidator;
 import com.travelmind.aiagent.planning.service.TravelPlanValidator;
+import com.travelmind.aiagent.planning.service.TravelMapPlanService;
 import com.travelmind.aiagent.rag.TravelKnowledgeIndexService;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
 import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
@@ -49,6 +51,7 @@ public class TravelWorkflowNodeCatalog {
     private final TravelConstraintExtractor constraintExtractor;
     private final TravelCandidateCollector candidateCollector;
     private final TravelConstraintSolver constraintSolver;
+    private final TravelMapPlanService mapPlanService;
     private final TravelPlanValidator planValidator;
     private final TravelFreshnessValidator freshnessValidator;
     private static final String FALLBACK_CHAT_REPLY = """
@@ -65,6 +68,7 @@ public class TravelWorkflowNodeCatalog {
                                      TravelConstraintExtractor constraintExtractor,
                                      TravelCandidateCollector candidateCollector,
                                      TravelConstraintSolver constraintSolver,
+                                     TravelMapPlanService mapPlanService,
                                      TravelPlanValidator planValidator,
                                      TravelFreshnessValidator freshnessValidator) {
         this.chatModel = chatModel;
@@ -78,6 +82,7 @@ public class TravelWorkflowNodeCatalog {
         this.constraintExtractor = constraintExtractor;
         this.candidateCollector = candidateCollector;
         this.constraintSolver = constraintSolver;
+        this.mapPlanService = mapPlanService;
         this.planValidator = planValidator;
         this.freshnessValidator = freshnessValidator;
     }
@@ -91,6 +96,7 @@ public class TravelWorkflowNodeCatalog {
                 observability,
                 new TravelConstraintExtractor(), new TravelCandidateCollector(toolProvider, objectMapper, eventStore),
                 new com.travelmind.aiagent.planning.service.DeterministicTravelConstraintSolver(),
+                new TravelMapPlanService(toolProvider, objectMapper, eventStore),
                 new TravelPlanValidator(), new TravelFreshnessValidator());
     }
 
@@ -107,6 +113,7 @@ public class TravelWorkflowNodeCatalog {
             case TravelPlanningGraphFactory.CONTEXT -> node(physicalId, 0, this::buildFormalContext);
             case TravelPlanningGraphFactory.CANDIDATES -> node(physicalId, 1, this::retrieveCandidates);
             case TravelPlanningGraphFactory.SOLVE -> node(physicalId, 0, this::solveConstraints);
+            case TravelPlanningGraphFactory.MAP -> node(physicalId, 0, this::buildMapPlan);
             case TravelPlanningGraphFactory.RELAX -> node(physicalId, 0, this::buildRelaxationQuestion);
             case TravelPlanningGraphFactory.GENERATE -> node(physicalId, 1, this::generateFinalItinerary);
             case TravelPlanningGraphFactory.VALIDATE -> node(physicalId, 0, this::validateFormalResult);
@@ -392,6 +399,15 @@ public class TravelWorkflowNodeCatalog {
                 .build();
     }
 
+    private NodeExecutionResult buildMapPlan(WorkflowState state) {
+        TravelConstraintSpec spec = value(state, "constraintSpec", TravelConstraintSpec.class);
+        TravelSolverResult solution = value(state, "solverResult", TravelSolverResult.class);
+        TravelMapPlan mapPlan = mapPlanService.build(state.getTaskId(),
+                Objects.toString(state.getRequest().get("userId"), "anonymous"), spec, solution);
+        return NodeExecutionResult.builder().data(Map.of("mapPlan", mapPlan))
+                .warnings(mapPlan.warnings()).build();
+    }
+
     private NodeExecutionResult validateFormalResult(WorkflowState state) {
         TravelConstraintSpec spec = value(state, "constraintSpec", TravelConstraintSpec.class);
         TravelSolverResult solution = value(state, "solverResult", TravelSolverResult.class);
@@ -454,6 +470,7 @@ public class TravelWorkflowNodeCatalog {
             Map<String, Object> briefing = new LinkedHashMap<>();
             briefing.put("旅行要求", constraintBrief(value(state, "constraintSpec", TravelConstraintSpec.class)));
             briefing.put("排定结果", solutionBrief(value(state, "solverResult", TravelSolverResult.class)));
+            briefing.put("地图点位与分段路线", state.getData().getOrDefault("mapPlan", Map.of()));
             briefing.put("目的地参考资料", state.getData().getOrDefault("knowledgeEvidence", List.of()));
             boolean modifying = Boolean.TRUE.equals(state.getData().get("modificationMode"));
             if (modifying) {

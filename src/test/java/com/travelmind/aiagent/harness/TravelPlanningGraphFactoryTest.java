@@ -30,7 +30,7 @@ class TravelPlanningGraphFactoryTest {
                 TravelPlanningGraphFactory.INTENT,
                 TravelPlanningGraphFactory.EXTRACT, TravelPlanningGraphFactory.CHECK,
                 TravelPlanningGraphFactory.CONTEXT, TravelPlanningGraphFactory.CANDIDATES,
-                TravelPlanningGraphFactory.SOLVE, TravelPlanningGraphFactory.GENERATE,
+                TravelPlanningGraphFactory.SOLVE, TravelPlanningGraphFactory.MAP, TravelPlanningGraphFactory.GENERATE,
                 TravelPlanningGraphFactory.VALIDATE, TravelPlanningGraphFactory.FRESHNESS,
                 TravelPlanningGraphFactory.PERSIST);
     }

@@ -1,6 +1,10 @@
 # 前端构建阶段
 FROM node:20-alpine AS build
 WORKDIR /app
+ARG VITE_AMAP_JS_API_KEY
+ARG VITE_AMAP_JS_SECURITY_CODE
+ENV VITE_AMAP_JS_API_KEY=${VITE_AMAP_JS_API_KEY}
+ENV VITE_AMAP_JS_SECURITY_CODE=${VITE_AMAP_JS_SECURITY_CODE}
 COPY . .
 # 依赖走 npmmirror，并用缓存卷加速重复构建
 RUN --mount=type=cache,target=/root/.npm npm ci --registry=https://registry.npmmirror.com

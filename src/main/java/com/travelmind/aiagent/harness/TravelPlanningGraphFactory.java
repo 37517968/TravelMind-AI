@@ -29,6 +29,7 @@ public class TravelPlanningGraphFactory {
     public static final String CONTEXT = "CONTEXT_BUILDING";
     public static final String CANDIDATES = "CANDIDATE_RETRIEVAL";
     public static final String SOLVE = "CONSTRAINT_SOLVING";
+    public static final String MAP = "MAP_PLANNING";
     public static final String RELAX = "UNSAT_RELAXATION";
     public static final String GENERATE = "ITINERARY_GENERATION";
     public static final String VALIDATE = "DETERMINISTIC_VALIDATION";
@@ -42,6 +43,7 @@ public class TravelPlanningGraphFactory {
             Map.entry(EXTRACT, "理解旅行要求"), Map.entry(CHECK, "核对信息是否齐全"),
             Map.entry(CONTEXT, "查阅目的地资料"), Map.entry(CANDIDATES, "查询可订的住宿景点"),
             Map.entry(SOLVE, "编排预算与行程"), Map.entry(RELAX, "给出调整建议"),
+            Map.entry(MAP, "生成景点地图与路线"),
             Map.entry(GENERATE, "生成行程方案"), Map.entry(VALIDATE, "检查方案质量"),
             Map.entry(FRESHNESS, "确认信息时效"), Map.entry(PERSIST, "保存方案"));
 
@@ -67,6 +69,7 @@ public class TravelPlanningGraphFactory {
             add(graph, CONTEXT, nodeRunner);
             add(graph, CANDIDATES, nodeRunner);
             add(graph, SOLVE, nodeRunner);
+            add(graph, MAP, nodeRunner);
             add(graph, RELAX, nodeRunner);
             add(graph, GENERATE, nodeRunner);
             add(graph, VALIDATE, nodeRunner);
@@ -88,10 +91,11 @@ public class TravelPlanningGraphFactory {
                     .addEdge(CONTEXT, CANDIDATES)
                     .addEdge(CANDIDATES, SOLVE)
                     .addConditionalEdges(SOLVE, edge_async(state -> state.value("route", "UNKNOWN")), Map.of(
-                            "SAT", GENERATE,
+                            "SAT", MAP,
                             "UNSAT", RELAX,
                             "UNKNOWN", RELAX))
                     .addEdge(RELAX, END)
+                    .addEdge(MAP, GENERATE)
                     .addEdge(GENERATE, VALIDATE)
                     .addConditionalEdges(VALIDATE, edge_async(state -> state.value("route", "INVALID")), Map.of(
                             "VALID", FRESHNESS,

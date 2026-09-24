@@ -10,16 +10,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RemoteMcpClientManagerTest {
 
     @Test
-    void shouldRequireHttpsVersionAndExplicitAllowlist() {
+    void shouldRequireHttpsTokenAndExplicitAllowlist() {
         RemoteMcpProperties.Server insecureUrl = validServer();
         insecureUrl.setUrl("http://mcp.example.com");
         assertThatThrownBy(() -> RemoteMcpClientManager.validateServerConfiguration("travel", insecureUrl))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("HTTPS");
 
-        RemoteMcpProperties.Server missingVersion = validServer();
-        missingVersion.setExpectedServerVersion(" ");
-        assertThatThrownBy(() -> RemoteMcpClientManager.validateServerConfiguration("travel", missingVersion))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("expected-server-version");
+        RemoteMcpProperties.Server missingToken = validServer();
+        missingToken.setToken(" ");
+        assertThatThrownBy(() -> RemoteMcpClientManager.validateServerConfiguration("travel", missingToken))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("url/token");
 
         RemoteMcpProperties.Server emptyAllowlist = validServer();
         emptyAllowlist.setAllowedTools(Set.of());
@@ -42,5 +42,18 @@ class RemoteMcpClientManagerTest {
         server.setAllowedTools(Set.of("weather", "route_plan"));
         server.setTimeout(Duration.ofSeconds(5));
         return server;
+    }
+
+    @Test
+    void shouldAcceptAmapStreamableHttpQueryAuthentication() {
+        RemoteMcpProperties.Server server = validServer();
+        server.setTransport(RemoteMcpProperties.Transport.STREAMABLE_HTTP);
+        server.setUrl("https://mcp.amap.com");
+        server.setEndpoint("/mcp");
+        server.setAuthQueryParameter("key");
+        server.setAuthHeader("");
+        server.setExpectedServerVersion("");
+        server.setAllowedTools(Set.of("maps_text_search", "maps_direction_driving"));
+        RemoteMcpClientManager.validateServerConfiguration("amap", server);
     }
 }

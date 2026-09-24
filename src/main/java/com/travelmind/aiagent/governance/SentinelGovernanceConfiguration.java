@@ -17,9 +17,6 @@ import java.util.List;
 @Configuration
 public class SentinelGovernanceConfiguration {
     private static final List<String> TOOL_RESOURCES = List.of(
-            "tool.getCurrentWeather", "tool.getWeatherForecast", "tool.searchAttractions",
-            "tool.searchHotels", "tool.searchRestaurants", "tool.searchNearby",
-            "tool.planDrivingRoute", "tool.planTransitRoute", "tool.planWalkingRoute",
             "tool.searchWeb", "tool.scrapeWebPage", "tool.downloadResource", "tool.mcp");
 
     @Value("${travel.governance.tool-max-concurrency:16}") private double toolConcurrency;

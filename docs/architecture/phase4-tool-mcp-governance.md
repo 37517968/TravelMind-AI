@@ -35,14 +35,14 @@ ChatClient / Harness
 
 ## MCP 上线约束
 
-远程 MCP 默认关闭。生产启用时必须同时配置 HTTPS 地址、认证 Token、非空工具白名单、期望服务版本和 Schema 版本；任一约束缺失会在客户端初始化阶段拒绝连接。启动发现工具后，将输入 Schema 的 SHA-256 登记到 `mcp_tool_schema`；同一版本发生 Schema 漂移时拒绝注册，必须显式提升版本。
+远程 MCP 默认关闭，同时支持旧 SSE 与推荐的 Streamable HTTP。生产启用时必须配置 HTTPS 地址、认证 Token、非空工具白名单和 Schema 版本；服务版本已知时可通过 `expected-server-version` 锁定，不公开版本的托管服务则记录握手返回版本。Header 与 URL Query 两种认证方式均可配置，日志会脱敏 Token。启动发现工具后，将输入 Schema 的 SHA-256 登记到 `mcp_tool_schema`；同一版本发生 Schema 漂移时拒绝注册，必须显式提升版本。高德的具体配置与操作见 [高德 MCP 接入](./AMAP-MCP-INTEGRATION.md)。
 
 ## 安全边界
 
 - 生产 profile 无条件不注册通用 Shell/FileSystem Tool；抓取和下载工具默认关闭。
 - 高风险工具还需要全局开关、`ADMIN` 角色和请求级 `highRiskApproved=true` 三重条件。
 - URL 参数只允许 HTTP/HTTPS，并拒绝常见本机、IPv4 私网、链路本地和 IPv6 私网字面地址。
-- 远程 MCP Tool 名增加服务名前缀，避免跨服务命名冲突。
+- 远程 MCP Tool 名增加服务名前缀，避免跨服务命名冲突；地图、天气、POI 与路线统一由高德 MCP 提供，不再并行维护本地高德/和风实现。
 - `prod` Profile 会在注册层和 Gateway 授权层强制关闭高风险 Tool，即使外部环境变量尝试覆盖开关也不会生效。
 
 ## 运维入口

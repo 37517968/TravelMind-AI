@@ -45,12 +45,6 @@ spring:
 search-api:
   api-key: ${SEARCH_API_KEY:}
 
-amap:
-  api-key: ${AMAP_API_KEY:}
-
-qweather:
-  api-key: ${QWEATHER_API_KEY:}
-
 travel:
   tools:
     # 生产无条件禁用 Shell/FileSystem/下载类高风险工具。
@@ -66,18 +60,6 @@ travel:
   mcp:
     remote:
       enabled: ${MCP_REMOTE_ENABLED:false}
-      servers:
-        travel-provider:
-          url: ${MCP_REMOTE_URL:}
-          sse-endpoint: ${MCP_REMOTE_SSE_ENDPOINT:/sse}
-          auth-header: ${MCP_AUTH_HEADER:Authorization}
-          auth-scheme: ${MCP_AUTH_SCHEME:Bearer}
-          token: ${MCP_AUTH_TOKEN:}
-          timeout: ${MCP_REQUEST_TIMEOUT:10s}
-          required: ${MCP_REQUIRED:false}
-          expected-server-version: ${MCP_SERVER_VERSION:}
-          schema-version: ${MCP_SCHEMA_VERSION:v1}
-          allowed-tools: ${MCP_ALLOWED_TOOLS:}
   knowledge:
     vectorstore:
       type: pgvector
