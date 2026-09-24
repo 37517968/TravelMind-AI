@@ -36,6 +36,8 @@ public class AgentTaskService {
             "userId", "conversationId", "taskType", "maxModelCalls", "maxTokens",
             "maxNodeExecutions", "maxAgentSteps", "baseTaskId", "basePlanSnapshot", "planningDraft",
             "_supplementalVersion");
+    /** 写入 agent_task.workflow_version，长度必须不超过该列宽度（见 V6 迁移）。 */
+    public static final String WORKFLOW_VERSION = "formal-travel-stategraph-v5-map-plan";
     private final AgentTaskMapper taskMapper;
     private final AgentWorkflowCheckpointMapper checkpointMapper;
     private final OutboxEventMapper outboxMapper;
@@ -59,7 +61,7 @@ public class AgentTaskService {
             task.setConversationId(request.getConversationId());
             task.setTaskType(request.getTaskType().name());
             task.setStatus(AgentTaskStatus.QUEUED.name());
-        task.setWorkflowVersion("formal-travel-stategraph-v5-map-plan");
+            task.setWorkflowVersion(WORKFLOW_VERSION);
             ObjectNode requestJson = objectMapper.valueToTree(request);
             requestJson.put("_supplementalVersion", 0);
             if (baseTask != null) {

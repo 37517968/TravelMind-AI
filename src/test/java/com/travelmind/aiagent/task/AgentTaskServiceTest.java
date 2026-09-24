@@ -15,7 +15,16 @@ import com.travelmind.aiagent.observability.PlatformObservability;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.List;
 import java.util.Map;
 
@@ -162,5 +171,26 @@ class AgentTaskServiceTest {
         assertThatThrownBy(() -> service.submit("modify-chat", request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("基线计划不存在");
+    }
+
+    @Test
+    void workflowVersionMustFitDatabaseColumnWidth() throws IOException {
+        Resource[] migrations = new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:db/migration/*.sql");
+        assertThat(migrations).as("db/migration 下的迁移脚本").isNotEmpty();
+        int declaredWidth = 0;
+        for (Resource migration : Arrays.stream(migrations)
+                .sorted(Comparator.comparing(resource -> String.valueOf(resource.getFilename())))
+                .toList()) {
+            String sql = new String(migration.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            Matcher matcher = Pattern.compile("workflow_version`?\\s*VARCHAR\\s*\\((\\d+)\\)", Pattern.CASE_INSENSITIVE)
+                    .matcher(sql);
+            while (matcher.find()) {
+                declaredWidth = Integer.parseInt(matcher.group(1));
+            }
+        }
+        assertThat(declaredWidth).as("迁移脚本中 agent_task.workflow_version 的列宽").isGreaterThan(0);
+        assertThat(AgentTaskService.WORKFLOW_VERSION).as("工作流版本必须能写入 workflow_version 列")
+                .hasSizeLessThanOrEqualTo(declaredWidth);
     }
 }
