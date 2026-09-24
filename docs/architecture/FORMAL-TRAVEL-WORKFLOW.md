@@ -52,12 +52,18 @@ flowchart TD
 
 - 只拼接 `conversationHistory` 最近 6 轮、每轮裁剪 180 字，避免历史长行程挤占提示词预算；
 - 上下文与用户输入一律声明为不可信材料，模型只允许返回 `{"intent","confidence","reason"}` 三字段 JSON；
+- 模型结论还要通过业务护栏：当前输入含明确旅行诉求时禁止落入 `CHAT`；存在 PlanningDraft/近期旅行上下文且输入为“随便、都可以、没有固定”等承接表达时转为 `SUPPLEMENT`；低置信度回退规则判定；
 - 模型不可用、超时或输出不可解析时按关键词规则兜底（重新开始 → `NEW_PLAN`，存在基线且引用某一天或增删改 → `MODIFY_PLAN`，
   旅行关键词 → `CREATE_PLAN`，问候闲聊 → `CHAT`，等待补充期间的短输入 → `SUPPLEMENT`），规则结论带 `intentSource=HEURISTIC` 便于排障；
 - 空输入不调用模型，直接交给 `CONSTRAINT_VALIDATION` 追问，保持零模型消耗；
 - 客户端显式声明的 `taskType` 优先于模型判定：`QA` 直接走闲聊分支，`MODIFY` 必然进入基线加载分支。
 
-`baseTaskId` 由前端绑定到用户当前看到的成功计划；未传时，后端按同一 `conversationId` 自动查找最近成功的 `PLAN/MODIFY` 任务。
+`conversationHistory` 负责意图和指代理解，不能代替结构化槽位。`CONSTRAINT_EXTRACTION` 会加载 Redis 中按 `conversationId`
+保存的 `PlanningDraft`，再按“草稿默认值 < 当前用户明确表达 < 显式 API 字段”的优先级合并。兼容没有草稿的旧会话时，
+只从最近 USER 消息恢复目的地、预算等事实，不把 ASSISTANT 文本直接视为用户约束。每次抽取后更新草稿；`NEW_PLAN` 清理旧草稿。
+
+`baseTaskId` 由前端绑定到用户当前看到的成功计划；未传时，后端按同一 `conversationId` 自动查找最近成功且
+`result_json.responseType` 为 `PLAN/MODIFY` 的任务，`CHAT` 结果不会再被误认为基线计划。
 后端校验任务状态、会话和用户归属，并在新任务的 `request_json.basePlanSnapshot` 中保存不可变快照，避免只依赖 Redis 中被裁剪的对话文本。
 
 ## 数据缺口不等于约束不可满足

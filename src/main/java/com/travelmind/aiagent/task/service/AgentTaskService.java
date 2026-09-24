@@ -34,13 +34,15 @@ import static com.travelmind.aiagent.task.messaging.AgentMessagingConstants.*;
 public class AgentTaskService {
     private static final Set<String> IMMUTABLE_TASK_FIELDS = Set.of(
             "userId", "conversationId", "taskType", "maxModelCalls", "maxTokens",
-            "maxNodeExecutions", "maxAgentSteps", "baseTaskId", "basePlanSnapshot", "_supplementalVersion");
+            "maxNodeExecutions", "maxAgentSteps", "baseTaskId", "basePlanSnapshot", "planningDraft",
+            "_supplementalVersion");
     private final AgentTaskMapper taskMapper;
     private final AgentWorkflowCheckpointMapper checkpointMapper;
     private final OutboxEventMapper outboxMapper;
     private final ObjectMapper objectMapper;
     private final PlatformObservability observability;
     private final AgentConversationMemoryService conversationMemory;
+    private final AgentPlanningDraftService planningDraftService;
 
     @Transactional
     public AgentTask submit(String requestId, AgentTaskCreateRequest request) {
@@ -66,6 +68,10 @@ public class AgentTaskService {
             }
             requestJson.set("conversationHistory",
                     objectMapper.valueToTree(conversationMemory.snapshot(request.getConversationId())));
+            Map<String, Object> planningDraft = planningDraftService.load(request.getConversationId());
+            if (!planningDraft.isEmpty()) {
+                requestJson.set("planningDraft", objectMapper.valueToTree(planningDraft));
+            }
             task.setRequestJson(writeJson(requestJson));
             task.setCancelRequested(false);
             task.setModelCallsUsed(0);
@@ -157,13 +163,26 @@ public class AgentTaskService {
                 || Objects.equals(base.getUserId(), request.getUserId());
         boolean usable = AgentTaskStatus.SUCCEEDED.name().equals(base.getStatus())
                 && ("PLAN".equals(base.getTaskType()) || "MODIFY".equals(base.getTaskType()))
-                && base.getResultJson() != null;
+                && isPlanningResult(base.getResultJson());
         if (!sameConversation || !sameUser || !usable) {
             if (request.getBaseTaskId() != null || request.getTaskType() == com.travelmind.aiagent.task.model.AgentTaskType.MODIFY)
                 throw new IllegalArgumentException("基线计划不存在、未完成或不属于当前会话");
             return null;
         }
         return base;
+    }
+
+    private boolean isPlanningResult(String resultJson) {
+        if (resultJson == null || resultJson.isBlank()) return false;
+        try {
+            JsonNode result = objectMapper.readTree(resultJson);
+            String responseType = result.path("responseType").asText("");
+            return ("PLAN".equals(responseType) || "MODIFY".equals(responseType))
+                    && result.hasNonNull("constraintSpec")
+                    && !result.path("itinerary").asText("").isBlank();
+        } catch (JsonProcessingException invalid) {
+            return false;
+        }
     }
 
     private void mergeSupplemental(AgentTask task, Map<String, Object> supplemental) {

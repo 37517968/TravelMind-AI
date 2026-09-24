@@ -14,6 +14,8 @@ public interface AgentTaskMapper extends BaseMapper<AgentTask> {
 
     @Select("SELECT * FROM agent_task WHERE conversation_id=#{conversationId} " +
             "AND status='SUCCEEDED' AND task_type IN ('PLAN','MODIFY') " +
+            "AND JSON_VALID(result_json)=1 " +
+            "AND JSON_UNQUOTE(JSON_EXTRACT(result_json, '$.responseType')) IN ('PLAN','MODIFY') " +
             "ORDER BY finished_at DESC, id DESC LIMIT 1")
     AgentTask selectLatestSucceededPlan(@Param("conversationId") String conversationId);
 

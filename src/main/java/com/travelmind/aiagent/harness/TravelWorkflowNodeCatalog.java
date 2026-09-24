@@ -15,6 +15,7 @@ import com.travelmind.aiagent.planning.service.TravelFreshnessValidator;
 import com.travelmind.aiagent.planning.service.TravelPlanValidator;
 import com.travelmind.aiagent.rag.TravelKnowledgeIndexService;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
+import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import com.travelmind.aiagent.tool.service.TravelToolFacade;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -43,6 +44,7 @@ public class TravelWorkflowNodeCatalog {
     private final ObjectProvider<TravelToolFacade> toolProvider;
     private final SentinelGovernanceService sentinel;
     private final AgentProgressEventStore eventStore;
+    private final AgentPlanningDraftService planningDraftService;
     private final PlatformObservability observability;
     private final TravelConstraintExtractor constraintExtractor;
     private final TravelCandidateCollector candidateCollector;
@@ -57,8 +59,9 @@ public class TravelWorkflowNodeCatalog {
     public TravelWorkflowNodeCatalog(ChatModel chatModel, ObjectMapper objectMapper,
                                      ObjectProvider<TravelKnowledgeIndexService> knowledgeProvider,
                                      ObjectProvider<TravelToolFacade> toolProvider,
-                                     SentinelGovernanceService sentinel, AgentProgressEventStore eventStore,
-                                     PlatformObservability observability,
+                                      SentinelGovernanceService sentinel, AgentProgressEventStore eventStore,
+                                      AgentPlanningDraftService planningDraftService,
+                                      PlatformObservability observability,
                                      TravelConstraintExtractor constraintExtractor,
                                      TravelCandidateCollector candidateCollector,
                                      TravelConstraintSolver constraintSolver,
@@ -70,6 +73,7 @@ public class TravelWorkflowNodeCatalog {
         this.toolProvider = toolProvider;
         this.sentinel = sentinel;
         this.eventStore = eventStore;
+        this.planningDraftService = planningDraftService;
         this.observability = observability;
         this.constraintExtractor = constraintExtractor;
         this.candidateCollector = candidateCollector;
@@ -80,10 +84,11 @@ public class TravelWorkflowNodeCatalog {
 
     TravelWorkflowNodeCatalog(ChatModel chatModel, ObjectMapper objectMapper,
                               ObjectProvider<TravelKnowledgeIndexService> knowledgeProvider,
-                              ObjectProvider<TravelToolFacade> toolProvider,
-                              SentinelGovernanceService sentinel, AgentProgressEventStore eventStore,
-                              PlatformObservability observability) {
-        this(chatModel, objectMapper, knowledgeProvider, toolProvider, sentinel, eventStore, observability,
+                               ObjectProvider<TravelToolFacade> toolProvider,
+                               SentinelGovernanceService sentinel, AgentProgressEventStore eventStore,
+                               AgentPlanningDraftService planningDraftService, PlatformObservability observability) {
+        this(chatModel, objectMapper, knowledgeProvider, toolProvider, sentinel, eventStore, planningDraftService,
+                observability,
                 new TravelConstraintExtractor(), new TravelCandidateCollector(toolProvider, objectMapper, eventStore),
                 new com.travelmind.aiagent.planning.service.DeterministicTravelConstraintSolver(),
                 new TravelPlanValidator(), new TravelFreshnessValidator());
@@ -118,25 +123,27 @@ public class TravelWorkflowNodeCatalog {
         String input = TravelIntentRouter.currentInput(request);
         boolean awaiting = TravelIntentRouter.awaitingClarification(request);
         boolean hasBasePlan = TravelIntentRouter.hasBasePlan(request);
+        boolean hasDraft = TravelIntentRouter.hasPlanningDraft(request);
         TravelIntentRouter.Outcome explicit = TravelIntentRouter.explicit(request);
         if (explicit != null) return NodeExecutionResult.builder().data(intentData(explicit)).build();
-        if (input.isBlank()) {
-            return NodeExecutionResult.builder().data(intentData(
-                    TravelIntentRouter.heuristic(input, awaiting, hasBasePlan))).build();
-        }
         String context = TravelIntentRouter.contextBlock(request.get("conversationHistory"),
                 TravelIntentRouter.CONTEXT_TURNS, TravelIntentRouter.TURN_CHARS);
-        String prompt = TravelIntentRouter.prompt(context, input, awaiting, hasBasePlan);
+        boolean hasPlanningContext = awaiting || hasBasePlan || hasDraft || TravelIntentRouter.hasTravelSignal(context);
+        if (input.isBlank()) {
+            return NodeExecutionResult.builder().data(intentData(
+                    TravelIntentRouter.heuristic(input, awaiting, hasBasePlan, hasPlanningContext))).build();
+        }
+        String prompt = TravelIntentRouter.prompt(context, input, awaiting, hasBasePlan, hasPlanningContext);
         try {
             String raw = sentinel.executeModel(() -> ChatClient.builder(chatModel).build()
                     .prompt().user(prompt).call().content());
             TravelIntentRouter.Outcome outcome = TravelIntentRouter.parse(raw, objectMapper);
-            if (outcome == null) outcome = TravelIntentRouter.heuristic(input, awaiting, hasBasePlan);
+            outcome = TravelIntentRouter.enforce(outcome, input, awaiting, hasBasePlan, hasPlanningContext);
             return NodeExecutionResult.builder().data(intentData(outcome))
                     .modelCalls(1).estimatedTokens(estimateTokens(prompt, raw)).build();
         } catch (Exception modelFailure) {
             return NodeExecutionResult.builder().data(intentData(
-                            TravelIntentRouter.heuristic(input, awaiting, hasBasePlan)))
+                            TravelIntentRouter.heuristic(input, awaiting, hasBasePlan, hasPlanningContext)))
                     .warnings(List.of("意图模型不可用，已使用规则兜底判定"))
                     .modelCalls(1).estimatedTokens(estimateTokens(prompt, "")).build();
         }
@@ -202,10 +209,25 @@ public class TravelWorkflowNodeCatalog {
 
     private NodeExecutionResult extractConstraints(WorkflowState state) {
         boolean modifying = Boolean.TRUE.equals(state.getData().get("modificationMode"));
-        Map<String, Object> extractionInput = modifying ? baseConstraintInput(state) : new LinkedHashMap<>();
+        boolean newPlan = Boolean.TRUE.equals(state.getData().get("newPlan"));
+        Map<String, Object> draftInput = modifying || newPlan ? new LinkedHashMap<>() : planningDraftInput(state);
+        Map<String, Object> extractionInput = modifying ? baseConstraintInput(state) : new LinkedHashMap<>(draftInput);
+        if (!draftInput.isEmpty()) {
+            extractionInput.put("_destinationFromDraft", isBlank(state.getRequest().get("destination"))
+                    && !isBlank(draftInput.get("destination")));
+            extractionInput.put("_budgetFromDraft", state.getRequest().get("budget") == null
+                    && draftInput.get("budget") != null);
+        }
         mergeMeaningful(extractionInput, state.getRequest());
         extractionInput.put("modificationMode", modifying);
         String promptText = TravelIntentRouter.currentInput(state.getRequest());
+        String recentUserText = newPlan ? "" : TravelIntentRouter.recentUserPlanningText(
+                state.getRequest().get("conversationHistory"), TravelIntentRouter.CONTEXT_TURNS,
+                TravelIntentRouter.TURN_CHARS);
+        String extractionText = promptText;
+        if (!recentUserText.isBlank()) {
+            extractionText = promptText + "\n此前用户已确认的信息：" + recentUserText;
+        }
         if (!promptText.isBlank()) {
             try {
                 String extractionPrompt = modifying ? """
@@ -215,16 +237,20 @@ public class TravelWorkflowNodeCatalog {
                         上一版约束：%s
                         上一版行程摘要：%s
                         用户修改要求：%s
-                        """.formatted(objectMapper.writeValueAsString(extractionInput), baseItinerary(state), promptText)
-                        : """
-                        你是旅行约束抽取器。只输出 JSON，不要输出 Markdown，不得生成代码。
-                        金额字段统一使用人民币元；硬约束与软偏好必须分开；无法确定的字段使用 null 或空数组。
-                        Schema: {"origin":"","destination":"","startDate":"yyyy-MM-dd|null","days":3,
-                        "travelers":1,"budget":3000,"constraints":{"allowedTransportModes":[],
-                        "requiredAttractionTags":[],"requiredCuisineTags":[],"hotelMaxNightly":null,
-                        "softPreferences":{}}}
-                        用户请求：%s
-                        """.formatted(promptText);
+                         """.formatted(objectMapper.writeValueAsString(extractionInput), baseItinerary(state), promptText)
+                         : """
+                         你是旅行约束抽取器。只输出 JSON，不要输出 Markdown，不得生成代码。
+                         金额字段统一使用人民币元；硬约束与软偏好必须分开；无法确定的字段使用 null 或空数组。
+                         只把用户自己说过的信息当作事实；已确认草稿作为默认值，当前请求明确给出的新值优先。
+                         Schema: {"origin":"","destination":"","startDate":"yyyy-MM-dd|null","days":3,
+                         "travelers":1,"budget":3000,"constraints":{"allowedTransportModes":[],
+                         "requiredAttractionTags":[],"requiredCuisineTags":[],"hotelMaxNightly":null,
+                         "softPreferences":{}}}
+                         已确认草稿：%s
+                         最近用户原话：%s
+                         当前用户请求：%s
+                         """.formatted(objectMapper.writeValueAsString(planningDraftInput(state)),
+                        recentUserText.isBlank() ? "（无）" : recentUserText, promptText);
                 String raw = sentinel.executeModel(() -> ChatClient.builder(chatModel).build()
                         .prompt().user(extractionPrompt).call().content());
                 @SuppressWarnings("unchecked")
@@ -232,9 +258,10 @@ public class TravelWorkflowNodeCatalog {
                 mergeMeaningful(extractionInput, inferred);
                 // 显式 API 字段优先于模型推断；空集合和 null 不会覆盖上一版约束。
                 mergeMeaningful(extractionInput, state.getRequest());
-                extractionInput.put("prompt", promptText);
+                extractionInput.put("prompt", extractionText);
                 extractionInput.put("modificationMode", modifying);
                 TravelConstraintSpec spec = constraintExtractor.extract(extractionInput);
+                savePlanningDraft(state, spec);
                 return NodeExecutionResult.builder().data(Map.of(
                                 "constraintSpec", spec,
                                 "constraintChangeSet", modifying ? inferred : Map.of()))
@@ -243,7 +270,9 @@ public class TravelWorkflowNodeCatalog {
                 // 模型结构化失败时使用确定性解析；不会把任意模型文本交给执行器。
             }
         }
+        extractionInput.put("prompt", extractionText);
         TravelConstraintSpec spec = constraintExtractor.extract(extractionInput);
+        savePlanningDraft(state, spec);
         return NodeExecutionResult.builder().data(Map.of("constraintSpec", spec))
                 .warnings(promptText.isBlank() ? List.of() : List.of("约束模型抽取失败，已使用确定性字段解析兜底")).build();
     }
@@ -252,6 +281,21 @@ public class TravelWorkflowNodeCatalog {
         Object rawPlan = state.getData().get("basePlan");
         if (!(rawPlan instanceof Map<?, ?> plan) || plan.get("constraintSpec") == null) return new LinkedHashMap<>();
         TravelConstraintSpec base = objectMapper.convertValue(plan.get("constraintSpec"), TravelConstraintSpec.class);
+        return constraintInput(base);
+    }
+
+    private Map<String, Object> planningDraftInput(WorkflowState state) {
+        Object rawDraft = state.getRequest().get("planningDraft");
+        if (!(rawDraft instanceof Map<?, ?> draft) || draft.get("constraintSpec") == null)
+            return new LinkedHashMap<>();
+        try {
+            return constraintInput(objectMapper.convertValue(draft.get("constraintSpec"), TravelConstraintSpec.class));
+        } catch (IllegalArgumentException invalidDraft) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private Map<String, Object> constraintInput(TravelConstraintSpec base) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("origin", base.origin());
         values.put("destination", base.destination());
@@ -269,6 +313,15 @@ public class TravelWorkflowNodeCatalog {
         constraints.put("softPreferences", base.softPreferences());
         values.put("constraints", constraints);
         return values;
+    }
+
+    private void savePlanningDraft(WorkflowState state, TravelConstraintSpec spec) {
+        String conversationId = Objects.toString(state.getRequest().get("conversationId"), "");
+        planningDraftService.save(conversationId, state.getTaskId(), spec);
+    }
+
+    private boolean isBlank(Object value) {
+        return value == null || value.toString().isBlank();
     }
 
     @SuppressWarnings("unchecked")

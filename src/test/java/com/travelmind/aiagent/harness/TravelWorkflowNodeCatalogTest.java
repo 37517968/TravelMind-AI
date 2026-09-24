@@ -5,6 +5,7 @@ import com.travelmind.aiagent.rag.TravelKnowledgeIndexService;
 import com.travelmind.aiagent.governance.SentinelGovernanceService;
 import com.travelmind.aiagent.observability.PlatformObservability;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
+import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import com.travelmind.aiagent.tool.service.TravelToolFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
@@ -49,6 +50,44 @@ class TravelWorkflowNodeCatalogTest {
         NodeExecutionResult reply = catalog.fixedNode(TravelPlanningGraphFactory.CHAT_REPLY, state).execute(state);
         assertThat(reply.getData()).containsEntry("responseType", "CHAT");
         assertThat(String.valueOf(reply.getData().get("chatReply"))).contains("TravelMind");
+    }
+
+    @Test
+    void recentUserTravelFactsShouldFeedConstraintExtractionAcrossTasks() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog();
+        Map<String, Object> request = new java.util.LinkedHashMap<>();
+        request.put("conversationId", "conversation-shanghai");
+        request.put("prompt", "没有固定，帮我随便制定一下");
+        request.put("conversationHistory", List.of(
+                Map.of("role", "USER", "content", "你好，我想去上海旅行，预算2000元"),
+                Map.of("role", "ASSISTANT", "content", "已知你想去上海旅行，请告诉我出行天数和偏好")));
+        WorkflowState state = new WorkflowState(31L, request);
+
+        NodeExecutionResult intent = catalog.fixedNode(TravelPlanningGraphFactory.INTENT, state).execute(state);
+        assertThat(intent.getData()).containsEntry("intent", "SUPPLEMENT")
+                .containsEntry("workflowRoute", "CONTINUE");
+        state.merge(intent.getData());
+        NodeExecutionResult extraction = catalog.fixedNode(TravelPlanningGraphFactory.EXTRACT, state).execute(state);
+
+        var spec = (com.travelmind.aiagent.planning.model.TravelConstraintSpec)
+                extraction.getData().get("constraintSpec");
+        assertThat(spec.destination()).isEqualTo("上海");
+        assertThat(spec.maxBudgetCents()).isEqualTo(200000L);
+        assertThat(spec.days()).isEqualTo(3);
+    }
+
+    @Test
+    void explicitTravelRequestShouldNotFollowModelChatDecision() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog(
+                "{\"intent\":\"CHAT\",\"confidence\":0.95,\"reason\":\"包含问候\"}");
+        WorkflowState state = new WorkflowState(32L,
+                Map.of("prompt", "你好，我想去上海旅行，预算2000元"));
+
+        NodeExecutionResult intent = catalog.fixedNode(TravelPlanningGraphFactory.INTENT, state).execute(state);
+
+        assertThat(intent.getData()).containsEntry("intent", "CREATE_PLAN")
+                .containsEntry("workflowRoute", "CONTINUE")
+                .containsEntry("intentSource", "GUARDRAIL");
     }
 
     @Test
@@ -158,6 +197,7 @@ class TravelWorkflowNodeCatalogTest {
             }
         }
         return new TravelWorkflowNodeCatalog(mock(ChatModel.class), new ObjectMapper(), knowledge, tools,
-                sentinel, mock(AgentProgressEventStore.class), new PlatformObservability());
+                sentinel, mock(AgentProgressEventStore.class), mock(AgentPlanningDraftService.class),
+                new PlatformObservability());
     }
 }

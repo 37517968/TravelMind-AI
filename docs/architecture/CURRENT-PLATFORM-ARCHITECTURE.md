@@ -37,7 +37,7 @@ flowchart TB
 
     subgraph DATA[数据与消息基础设施]
         MYSQL[(MySQL\nTask/Checkpoint/Outbox/Result/Audit)]
-        REDIS[(Redis\nChat List/Progress Stream/Cache/Lock)]
+        REDIS[(Redis\nChat List/PlanningDraft/Progress Stream/Cache/Lock)]
         RABBIT[(RabbitMQ Quorum Queue\nRetry/DLQ)]
         ES[(Elasticsearch\nBM25)]
         PG[(PGVector\nSemantic Search)]
@@ -107,7 +107,7 @@ flowchart TB
 | 异步任务 | RabbitMQ Quorum Queue | 关键队列具备复制能力；配合手动 ACK、延迟重试和 DLQ 管理任务交付 |
 | 可靠发布 | MySQL Transactional Outbox + Publisher Confirm | 在一个本地事务内保存任务与待发事件，解决“任务入库但消息未发出”的双写问题 |
 | 任务事实源 | MySQL | 保存任务状态、执行预算、Checkpoint、最终结果、Outbox 和工具审计，适合事务与查询 |
-| 短期记忆/事件 | Redis List + Redis Stream | List 保存有界聊天窗口；Stream 保存可回放的临时进度和 Token 事件 |
+| 短期记忆/事件 | Redis List + String + Redis Stream | List 保存有界聊天窗口；String 保存结构化 PlanningDraft；Stream 保存可回放的临时进度和 Token 事件 |
 | 缓存与并发 | Redis + Redisson | RAG/Tool 缓存、短期降级结果和分布式防击穿锁 |
 | 关键词检索 | Elasticsearch BM25 | 支持倒排、过滤、版本化索引和横向扩展 |
 | 语义检索 | PGVector | 与 Spring AI VectorStore 集成，保存向量和元数据过滤字段 |
@@ -137,8 +137,8 @@ sequenceDiagram
     participant R as Redis（Memory / Stream）
 
     C->>A: POST /api/agent/tasks + Idempotency-Key
-    A->>R: 读取 conversationId 对应的 Redis 短期记忆窗口
-    A->>DB: 同一事务写 agent_task(QUEUED) + conversationHistory + outbox_event(PENDING)
+    A->>R: 读取 conversationId 对应的短期记忆窗口与 PlanningDraft
+    A->>DB: 同一事务写 agent_task(QUEUED) + conversationHistory + planningDraft 快照 + outbox_event(PENDING)
     A-->>C: 202 Accepted + taskId
     C->>A: GET /api/agent/tasks/{taskId}/events
     A->>R: XREAD BLOCK，游标来自 Last-Event-ID 或 0-0
@@ -213,18 +213,20 @@ sequenceDiagram
 
 ## 4. 记忆如何管理
 
-这里的“记忆”不是一种存储，而是按用途和生命周期拆分的四类数据。
+这里的“记忆”不是一种存储，而是按用途和生命周期拆分的五类数据。
 
 ```mermaid
 flowchart LR
     INPUT[用户对话/任务请求]
     CHAT[(Redis List\n短期会话窗口)]
+    DRAFT[(Redis String\nPlanningDraft 结构化槽位)]
     TASK[(MySQL\n任务与 Checkpoint)]
     EVENT[(Redis Stream\n短期进度与 Token)]
     KNOWLEDGE[(MySQL + ES + PGVector\n外部知识)]
     RESULT[(MySQL result_json\n最终业务结果)]
 
     INPUT --> CHAT
+    INPUT --> DRAFT
     INPUT --> TASK
     TASK --> EVENT
     TASK --> RESULT
@@ -244,12 +246,23 @@ flowchart LR
 - TTL：默认 30 天；
 - 注入：创建任务时读取当前窗口，写入 `request_json.conversationHistory`，Planning Agent 随任务状态读取；
 - 更新：提交和 `resume` 时追加用户消息，任务成功后追加最终回答；
-- 清理：`DELETE /api/agent/tasks/conversations/{conversationId}/memory`；
+- 清理：`DELETE /api/agent/tasks/conversations/{conversationId}/memory` 同时删除 ChatMemory 与 PlanningDraft；
 - 降级：Redis 记忆不可用时使用空历史继续创建任务，不破坏任务事实链路。
 
 Redis ChatMemory 是可共享的短期窗口，不是完整审计历史，也不是最终行程事实源。
 
-### 4.2 Agent 执行记忆
+### 4.2 会话级 PlanningDraft
+
+- 实现：`AgentPlanningDraftService`；Key 为 `agent:planning:draft:{sha256(conversationId)}`，默认 TTL 30 天；
+- 内容：白名单化的 `constraintSpec`、缺失字段、`COLLECTING/READY` 状态、来源任务和版本；
+- 写入：每次 `CONSTRAINT_EXTRACTION` 后保存，Redis 不可用时降级为“近期用户原话 + 当前请求”的确定性抽取；
+- 读取：创建任务时固化到 `request_json.planningDraft`，Worker 不依赖执行过程中的隐式 Redis 状态；
+- 合并：当前输入明确给出的字段覆盖草稿，显式 API 字段优先级最高，未提及字段继续继承；
+- 安全边界：只从 USER 消息继承事实，不把助手生成文本直接写成旅行约束；`NEW_PLAN` 会清空草稿。
+
+PlanningDraft 是跨任务的临时结构化上下文，不替代 MySQL 中的最终计划和 Checkpoint。
+
+### 4.3 Agent 执行记忆
 
 异步任务把可恢复状态保存在 MySQL：
 
@@ -262,7 +275,7 @@ Redis ChatMemory 是可共享的短期窗口，不是完整审计历史，也不
 
 恢复时从最新 `request_json` 创建 `WorkflowState`，再按顺序合并所有成功 Checkpoint 的输出。物理节点 ID 含 `_supplementalVersion`：同一版本恢复跳过成功节点，用户补充条件后执行新版本节点，避免复用已经失效的约束或候选。
 
-### 4.3 进度事件记忆
+### 4.4 进度事件记忆
 
 - Key：`agent:task:{taskId}:events`；
 - 数据结构：Redis Stream，每条进度或 Token Chunk 有独立 Stream Record ID；
@@ -270,7 +283,7 @@ Redis ChatMemory 是可共享的短期窗口，不是完整审计历史，也不
 - 读取：在线和断线重连都通过 `XREAD`；重连时使用浏览器传来的 `Last-Event-ID`；
 - 定位：只承担实时传输和短期回放，终态仍以 MySQL 为准。
 
-### 4.4 外部知识记忆
+### 4.5 外部知识记忆
 
 - MySQL 保存社区方案、评论、知识源版本和索引状态；
 - Knowledge Outbox/RabbitMQ 驱动增量索引、删除、对账与重建；
@@ -279,7 +292,7 @@ Redis ChatMemory 是可共享的短期窗口，不是完整审计历史，也不
 - `KnowledgeHybridSearchService` 使用 RRF 融合两路排名，通过 Redis 缓存查询结果，默认 TTL 5 分钟；
 - 固定图的 `CONTEXT_BUILDING` 节点按目的地与必选标签检索证据；候选数据由后续求解器消费，知识文本只作为解释和最终表述材料。
 
-### 4.5 当前未实现的记忆能力
+### 4.6 当前未实现的记忆能力
 
 以下仍属于后续改造，当前简历和架构说明不能写成已完成：
 
@@ -298,12 +311,13 @@ Redis ChatMemory 是可共享的短期窗口，不是完整审计历史，也不
 ```text
 System Policy
   + Redis ChatMemory 最近窗口快照 conversationHistory
+  + Redis PlanningDraft 结构化约束快照
   + 当前用户 prompt 与 TravelConstraintSpec
   + 已恢复的结构化 Checkpoint
   + 类型化 Tool 候选与 TopK RAG 证据
 ```
 
-`conversationId` 负责隔离 Redis 短期窗口。ChatMemory 不直接成为模型的隐藏状态，而是在创建任务时生成显式快照，随后跟随任务 Checkpoint 一起恢复。该链路已有消息数窗口，但没有生产级精确 Token 预算、滚动摘要和长期记忆召回。
+`conversationId` 负责隔离 Redis 短期窗口和 PlanningDraft。二者都不直接成为模型的隐藏状态，而是在创建任务时生成显式快照，随后跟随任务 Checkpoint 一起恢复。ChatMemory 用于意图和指代理解，PlanningDraft 用于传递已确认槽位；该链路仍没有生产级精确 Token 预算、滚动摘要和长期记忆召回。
 
 ### 5.2 `/api/agent/tasks` 规划上下文
 
@@ -347,6 +361,7 @@ System Policy
 | 数据 | 存储 | 生命周期 | 是否事实源 |
 |---|---|---|---|
 | 短期聊天窗口 | Redis List | 默认 30 天、最多 50 条 | 否 |
+| 旅行规划草稿 | Redis String | 默认 30 天，`NEW_PLAN` 主动清理 | 否，跨任务结构化上下文 |
 | 任务请求/状态/预算 | MySQL `agent_task` | 业务保留周期 | 是 |
 | 节点决策与输出 | MySQL Checkpoint | 随任务保留 | 是 |
 | SSE 进度与 Token | Redis Stream | 24 小时、约 1000 条 | 否 |
@@ -359,4 +374,4 @@ System Policy
 
 ## 7. 当前结论
 
-当前项目已经形成“可靠异步任务外壳 + 可恢复 Planning Agent + 按需 Tool/RAG + SSE 流式事件 + MySQL 最终事实源”的主链路。记忆目前完成了 Redis 短期会话窗口、MySQL 执行状态和外部知识记忆三类能力；完整历史、滚动摘要、用户画像和精确 Token 上下文压缩仍应作为下一阶段工作。
+当前项目已经形成“可靠异步任务外壳 + 可恢复 Planning Agent + 按需 Tool/RAG + SSE 流式事件 + MySQL 最终事实源”的主链路。记忆目前完成了 Redis 短期会话窗口、会话级 PlanningDraft、MySQL 执行状态和外部知识记忆；完整历史、滚动摘要、用户画像和精确 Token 上下文压缩仍应作为下一阶段工作。

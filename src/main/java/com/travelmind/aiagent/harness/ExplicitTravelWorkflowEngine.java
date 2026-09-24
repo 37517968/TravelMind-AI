@@ -12,6 +12,7 @@ import com.travelmind.aiagent.task.model.AgentTaskStatus;
 import com.travelmind.aiagent.task.model.AgentWorkflowCheckpoint;
 import com.travelmind.aiagent.observability.PlatformObservability;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
+import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
     private final ExecutorService agentNodeInvocationExecutor;
     private final PlatformObservability observability;
     private final AgentConversationMemoryService conversationMemory;
+    private final AgentPlanningDraftService planningDraftService;
     private final TravelPlanningGraphFactory graphFactory;
 
     @Override
@@ -196,6 +198,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
      */
     private void restartForNewPlan(Long taskId, WorkflowState state, NodeExecutionResult intentResult) {
         if (!Boolean.TRUE.equals(intentResult.getData().get("newPlan"))) return;
+        planningDraftService.clear(Objects.toString(state.getRequest().get("conversationId"), ""));
         TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
         state.retainOnly(intentResult.getData());
         log.info("Task {} restarts travel planning on a new request at supplemental version {}", taskId,

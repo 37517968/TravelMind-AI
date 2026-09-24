@@ -8,6 +8,7 @@ import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
 import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.model.AgentWorkflowCheckpoint;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
+import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.ObjectProvider;
@@ -138,7 +139,7 @@ class ExplicitTravelWorkflowEngineTest {
         ObjectMapper mapper = fixtureMapper;
         TravelWorkflowNodeCatalog catalog = new TravelWorkflowNodeCatalog(chatModel, mapper,
                 mock(ObjectProvider.class), mock(ObjectProvider.class), sentinel, events,
-                new PlatformObservability());
+                mock(AgentPlanningDraftService.class), new PlatformObservability());
         AgentTask task = new AgentTask();
         task.setId(taskId);
         task.setStatus("RUNNING");
@@ -175,7 +176,8 @@ class ExplicitTravelWorkflowEngineTest {
         ExecutorService invocationExecutor = Executors.newVirtualThreadPerTaskExecutor();
         ExplicitTravelWorkflowEngine engine = new ExplicitTravelWorkflowEngine(tasks, checkpointsStore,
                 catalog, events, mapper, parallelExecutor, invocationExecutor, new PlatformObservability(),
-                mock(AgentConversationMemoryService.class), new TravelPlanningGraphFactory());
+                mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class),
+                new TravelPlanningGraphFactory());
         return new Fixture(engine, tasks, checkpointsStore, chatModel, sentinel, startedNodes, stateSnapshots,
                 () -> (Map<String, Object>) extractionHolder[0], parallelExecutor, invocationExecutor);
     }

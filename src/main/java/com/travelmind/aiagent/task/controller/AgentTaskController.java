@@ -6,6 +6,7 @@ import com.travelmind.aiagent.task.dto.AgentTaskView;
 import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.service.AgentTaskService;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
+import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ import java.util.Map;
 public class AgentTaskController {
     private final AgentTaskService taskService;
     private final AgentConversationMemoryService conversationMemory;
+    private final AgentPlanningDraftService planningDraftService;
 
     @PostMapping
     @Operation(summary = "提交旅行规划任务（立即返回，不等待模型）")
@@ -61,9 +63,10 @@ public class AgentTaskController {
     }
 
     @DeleteMapping("/conversations/{conversationId}/memory")
-    @Operation(summary = "清除统一任务入口的短期会话记忆")
+    @Operation(summary = "清除统一任务入口的短期会话记忆和旅行规划草稿")
     public Map<String, Object> clearConversationMemory(@PathVariable String conversationId) {
         conversationMemory.clear(conversationId);
+        planningDraftService.clear(conversationId);
         return Map.of("success", true, "conversationId", conversationId);
     }
 }

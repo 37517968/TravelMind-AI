@@ -71,6 +71,28 @@ class TravelIntentRouterTest {
     }
 
     @Test
+    void modelChatDecisionShouldBeRejectedForExplicitTravelRequest() {
+        TravelIntentRouter.Outcome guarded = TravelIntentRouter.enforce(
+                new TravelIntentRouter.Outcome(TravelIntentRouter.Decision.CHAT, 0.91D,
+                        "包含问候", "MODEL"),
+                "你好，我想去上海旅行，预算2000元", false, false, false);
+
+        assertThat(guarded.decision()).isEqualTo(TravelIntentRouter.Decision.CREATE_PLAN);
+        assertThat(guarded.source()).isEqualTo("GUARDRAIL");
+    }
+
+    @Test
+    void vagueAnswerShouldContinueWhenRecentConversationContainsPlanningContext() {
+        TravelIntentRouter.Outcome guarded = TravelIntentRouter.enforce(
+                new TravelIntentRouter.Outcome(TravelIntentRouter.Decision.CHAT, 0.7D,
+                        "当前句较短", "MODEL"),
+                "没有固定，帮我随便制定一下", false, false, true);
+
+        assertThat(guarded.decision()).isEqualTo(TravelIntentRouter.Decision.SUPPLEMENT);
+        assertThat(guarded.route()).isEqualTo("CONTINUE");
+    }
+
+    @Test
     void contextBlockShouldOnlyKeepRecentTurnsWithinBudget() {
         List<Map<String, String>> history = new ArrayList<>();
         for (int i = 1; i <= 12; i++) {

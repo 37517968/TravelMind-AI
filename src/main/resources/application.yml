@@ -212,6 +212,9 @@ agent:
     redis:
       max-messages: 50
       ttl: 30d
+  planning-draft:
+    redis:
+      ttl: 30d
   task:
     outbox-publish-delay-ms: 1000
     outbox-batch-size: 50

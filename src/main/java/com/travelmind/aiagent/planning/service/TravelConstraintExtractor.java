@@ -30,16 +30,24 @@ public class TravelConstraintExtractor {
         Map<String, Object> constraints = mapValue(safe.get("constraints"));
         String prompt = (stringValue(safe.get("prompt")) + " " + stringValue(safe.get("userClarification"))).trim();
         boolean modifying = Boolean.TRUE.equals(safe.get("modificationMode"));
+        boolean destinationFromDraft = Boolean.TRUE.equals(safe.get("_destinationFromDraft"));
+        boolean budgetFromDraft = Boolean.TRUE.equals(safe.get("_budgetFromDraft"));
         String changedDestination = modifying ? match(prompt, CHANGED_DESTINATION) : "";
-        String destination = firstNonBlank(changedDestination, stringValue(safe.get("destination")),
-                stringValue(constraints.get("destination")), match(prompt, DESTINATION));
+        String promptDestination = match(prompt, DESTINATION);
+        String destination = destinationFromDraft
+                ? firstNonBlank(changedDestination, promptDestination, stringValue(safe.get("destination")),
+                        stringValue(constraints.get("destination")))
+                : firstNonBlank(changedDestination, stringValue(safe.get("destination")),
+                        stringValue(constraints.get("destination")), promptDestination);
         Integer promptDays = optionalIntMatch(prompt, DAYS);
         Integer promptTravelers = optionalIntMatch(prompt, TRAVELERS);
         int days = promptDays == null ? intValue(safe.get("days"), 3) : promptDays;
         int travelers = promptTravelers == null ? intValue(safe.get("travelers"), 1) : promptTravelers;
         Long promptBudget = moneyMatchToCents(prompt);
-        Long budget = modifying && promptBudget != null ? promptBudget : moneyToCents(safe.get("budget"));
-        if (budget == null) budget = promptBudget;
+        Long structuredBudget = moneyToCents(safe.get("budget"));
+        Long budget = modifying || budgetFromDraft
+                ? (promptBudget != null ? promptBudget : structuredBudget)
+                : (structuredBudget != null ? structuredBudget : promptBudget);
         Long hotelMax = moneyToCents(constraints.get("hotelMaxNightly"));
 
         return new TravelConstraintSpec(
