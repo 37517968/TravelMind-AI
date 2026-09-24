@@ -56,7 +56,7 @@ public class TravelMapPlanService {
         List<ResolvedPoi> pois = new ArrayList<>();
         for (TravelCandidate candidate : selectedPois) {
             ResolvedPoi poi = resolvePoi(facade, candidate, taskId, userId);
-            if (poi != null) pois.add(poi);
+            if (poi != null && poi.location != null) pois.add(poi);
         }
         // 没有选中地点与实时地点服务未接入是两件事，提示需要区分开。
         if (pois.isEmpty()) return TravelMapPlan.unavailable(spec.destination(),

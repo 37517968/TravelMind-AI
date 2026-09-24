@@ -28,6 +28,38 @@ class AmapPayloadParserTest {
     }
 
     @Test
+    void shouldKeepTrimmedSearchPoisWithoutLocationAndReadSinglePhoto() {
+        // 真实裁剪响应：关键词/周边搜索只有 id/name/address/typecode/photo，没有 location。
+        String data = """
+                [{"type":"text","text":"{\\"pois\\":[{\\"id\\":\\"B0FFGY78PQ\\",\\"name\\":\\"杭州武良旅馆\\",\\"address\\":\\"武林街道横广福路5号101室\\",\\"typecode\\":\\"100200\\",\\"photo\\":\\"https://store.is.autonavi.com/showpic/caaac3bc\\"}]}"}]
+                """;
+
+        var pois = parser.pois(success(data));
+
+        assertThat(pois).hasSize(1);
+        assertThat(pois.getFirst().id()).isEqualTo("B0FFGY78PQ");
+        assertThat(pois.getFirst().location()).isNull();
+        assertThat(pois.getFirst().photos()).extracting(photo -> photo.url())
+                .containsExactly("https://store.is.autonavi.com/showpic/caaac3bc");
+    }
+
+    @Test
+    void shouldParseDetailResponseThatReturnsASinglePoiObject() {
+        // 详情接口返回单个 POI 对象而不是 pois 数组，坐标要靠它补齐。
+        String data = """
+                [{"type":"text","text":"{\\"id\\":\\"B023B13L9M\\",\\"name\\":\\"杭州西湖风景名胜区\\",\\"location\\":\\"120.121358,30.222692\\",\\"address\\":\\"西湖街道龙井路1号\\",\\"city\\":\\"杭州市\\",\\"type\\":\\"风景名胜;风景名胜;国家级景点\\",\\"photo\\":\\"https://store.is.autonavi.com/showpic/78e3e7b4\\"}"}]
+                """;
+
+        var pois = parser.pois(success(data));
+
+        assertThat(pois).hasSize(1);
+        assertThat(pois.getFirst().id()).isEqualTo("B023B13L9M");
+        assertThat(pois.getFirst().city()).isEqualTo("杭州市");
+        assertThat(pois.getFirst().location().lng()).isEqualTo(120.121358);
+        assertThat(pois.getFirst().location().lat()).isEqualTo(30.222692);
+    }
+
+    @Test
     void shouldExtractRouteCostAndPolyline() {
         String data = """
                 {"route":{"paths":[{"distance":"1200","cost":{"duration":"960"},"steps":[

@@ -84,8 +84,12 @@ public class TravelCandidateCollector {
 
     private ToolResult nearbyPoi(TravelToolFacade facade, ToolResult seed, String keyword, Long taskId, String userId) {
         if (facade == null || !facade.hasTool(AMAP_AROUND_SEARCH)) return unavailable(AMAP_AROUND_SEARCH);
-        String location = amap.pois(seed).stream().findFirst()
-                .map(poi -> poi.location().lng() + "," + poi.location().lat()).orElse("");
+        // 关键词搜索的裁剪响应可能没有坐标，取第一个带坐标的候选当周边搜索中心。
+        String location = amap.pois(seed).stream()
+                .map(AmapPayloadParser.Poi::location)
+                .filter(point -> point != null)
+                .findFirst()
+                .map(point -> point.lng() + "," + point.lat()).orElse("");
         if (location.isBlank()) return unavailable(AMAP_AROUND_SEARCH);
         return invoke(facade, AMAP_AROUND_SEARCH,
                 Map.of("keywords", keyword, "location", location, "radius", 5000), taskId, userId);

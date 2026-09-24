@@ -51,25 +51,30 @@ final class AmapPayloadParser {
         if (node == null || !node.isObject()) return;
         String id = text(node, "id", "poiid", "poiId");
         String name = text(node, "name");
+        // 关键词/周边搜索的裁剪响应里没有 location，坐标得靠详情接口补，不能因此丢弃候选。
         TravelMapPlan.GeoPoint location = location(node.get("location"));
-        if (name.isBlank() || location == null) return;
-        if (id.isBlank()) id = name + "@" + location.lng() + "," + location.lat();
+        if (name.isBlank() && id.isBlank()) return;
+        if (id.isBlank()) id = location == null ? name : name + "@" + location.lng() + "," + location.lat();
         List<TravelMapPlan.Photo> photos = new ArrayList<>();
         JsonNode photoNodes = node.get("photos");
         if (photoNodes != null) {
             if (photoNodes.isArray()) photoNodes.forEach(photo -> addPhoto(photos, photo));
             else addPhoto(photos, photoNodes);
         }
+        if (photos.isEmpty()) addPhotoUrl(photos, name, text(node, "photo", "pic"));
         Poi incoming = new Poi(id, name, text(node, "address"), text(node, "city", "cityname"),
                 text(node, "type", "typecode"), location, List.copyOf(photos));
         unique.merge(id, incoming, Poi::merge);
     }
 
     private void addPhoto(List<TravelMapPlan.Photo> photos, JsonNode node) {
-        if (node == null || !node.isObject() || photos.size() >= 3) return;
-        String url = text(node, "url");
-        if (url.startsWith("https://") || url.startsWith("http://"))
-            photos.add(new TravelMapPlan.Photo(text(node, "title"), url));
+        if (node == null || !node.isObject()) return;
+        addPhotoUrl(photos, text(node, "title"), text(node, "url"));
+    }
+
+    private void addPhotoUrl(List<TravelMapPlan.Photo> photos, String title, String url) {
+        if (photos.size() >= 3) return;
+        if (url.startsWith("https://") || url.startsWith("http://")) photos.add(new TravelMapPlan.Photo(title, url));
     }
 
     private JsonNode json(Object raw) {
@@ -89,8 +94,8 @@ final class AmapPayloadParser {
 
     private JsonNode findEmbeddedJson(JsonNode node) {
         if (node == null) return null;
-        if (node.isObject() && (node.has("pois") || node.has("route") || node.has("paths") || node.has("transits")))
-            return node;
+        if (node.isObject() && (node.has("pois") || node.has("route") || node.has("paths")
+                || node.has("transits") || looksLikePoi(node))) return node;
         if (node.isObject()) {
             var fields = node.fields();
             while (fields.hasNext()) {
@@ -179,8 +184,10 @@ final class AmapPayloadParser {
         } catch (Exception ignored) { return null; }
     }
 
+    /** 裁剪版关键词搜索没有 location，只要带 id 就认作 POI，坐标交给详情接口补。 */
     private boolean looksLikePoi(JsonNode node) {
-        return node != null && node.isObject() && node.has("name") && node.has("location");
+        return node != null && node.isObject() && !text(node, "name").isBlank()
+                && (!text(node, "id", "poiid", "poiId").isBlank() || node.has("location"));
     }
 
     private String text(JsonNode node, String... names) {
