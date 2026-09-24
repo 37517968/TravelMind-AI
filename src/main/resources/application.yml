@@ -261,7 +261,7 @@ travel:
             - maps_search_detail
             - maps_direction_driving
             - maps_direction_walking
-            - maps_bicycling
+            - maps_direction_bicycling
             - maps_direction_transit_integrated
             - maps_distance
             - maps_weather

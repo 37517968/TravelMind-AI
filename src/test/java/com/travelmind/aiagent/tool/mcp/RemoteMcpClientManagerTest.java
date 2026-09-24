@@ -3,8 +3,10 @@ package com.travelmind.aiagent.tool.mcp;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RemoteMcpClientManagerTest {
@@ -30,6 +32,17 @@ class RemoteMcpClientManagerTest {
     @Test
     void shouldAcceptCompleteProductionConfiguration() {
         RemoteMcpClientManager.validateServerConfiguration("travel-provider", validServer());
+    }
+
+    @Test
+    void shouldRestoreServerToolNameFromSdkWrappedCallbackName() {
+        List<String> published = List.of("maps_text_search", "maps_direction_bicycling");
+        assertThat(RemoteMcpClientManager.originalToolName(published, "maps_text_search"))
+                .isEqualTo("maps_text_search");
+        assertThat(RemoteMcpClientManager.originalToolName(published, "JavaSDKMCPClient_maps_direction_bicycling"))
+                .isEqualTo("maps_direction_bicycling");
+        assertThatThrownBy(() -> RemoteMcpClientManager.originalToolName(published, "maps_unknown"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("Cannot resolve MCP tool name");
     }
 
     private RemoteMcpProperties.Server validServer() {

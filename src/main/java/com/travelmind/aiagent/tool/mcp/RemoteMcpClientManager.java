@@ -6,6 +6,7 @@ import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpClientTransport;
+import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -42,8 +43,18 @@ public class RemoteMcpClientManager {
 
     @PostConstruct
     public void initialize() {
-        if (!properties.isEnabled()) return;
+        if (!properties.isEnabled()) {
+            log.info("Remote MCP disabled: travel.mcp.remote.enabled=false, real-time tools are not registered");
+            return;
+        }
+        if (properties.getServers().isEmpty()) {
+            log.warn("Remote MCP enabled but no servers are configured");
+            return;
+        }
         properties.getServers().forEach(this::connect);
+        if (callbacks.isEmpty()) {
+            log.warn("Remote MCP enabled but no tools registered: check AMAP_MCP_API_KEY and outbound access to mcp.amap.com");
+        }
     }
 
     public ToolCallback[] callbacks() { return callbacks.toArray(ToolCallback[]::new); }
@@ -66,9 +77,11 @@ public class RemoteMcpClientManager {
                         + config.getExpectedServerVersion() + ", actual=" + actualVersion);
             ToolCallback[] discovered = new SyncMcpToolCallbackProvider((ignoredClient, tool) ->
                     config.getAllowedTools().contains(tool.name()), client).getToolCallbacks();
+            List<String> publishedNames = client.listTools().tools().stream()
+                    .map(McpSchema.Tool::name).toList();
             List<ToolCallback> serverCallbacks = new ArrayList<>();
             for (ToolCallback callback : discovered) {
-                String originalName = callback.getToolDefinition().name();
+                String originalName = originalToolName(publishedNames, callback.getToolDefinition().name());
                 schemas.register(name, actualVersion, originalName, config.getSchemaVersion(),
                         callback.getToolDefinition().inputSchema());
                 ToolCallback prefixed = new PrefixedToolCallback(name + "_" + originalName, callback);
@@ -82,6 +95,21 @@ public class RemoteMcpClientManager {
             log.warn("Remote MCP unavailable: server={}, reason={}", name, safeFailure(config, failure));
             if (config.isRequired()) throw new IllegalStateException("Required MCP server unavailable: " + name, failure);
         }
+    }
+
+    /**
+     * Spring AI 会在回调名上再加一层非服务端原始名的前缀，注册和治理都需要还原成 tools/list 的原始名。
+     * 以服务端返回的名字为准，避免依赖 SDK 内部命名实现。
+     */
+    static String originalToolName(List<String> publishedNames, String callbackName) {
+        if (publishedNames.contains(callbackName)) return callbackName;
+        List<String> matches = publishedNames.stream()
+                .filter(raw -> callbackName.endsWith("_" + raw))
+                .toList();
+        if (matches.size() != 1)
+            throw new IllegalStateException("Cannot resolve MCP tool name \"" + callbackName
+                    + "\" against server tools " + publishedNames);
+        return matches.get(0);
     }
 
     private McpClientTransport createTransport(RemoteMcpProperties.Server config, HttpRequest.Builder request) {
