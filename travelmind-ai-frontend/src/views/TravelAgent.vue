@@ -116,8 +116,26 @@ const assistantMessage = () => {
   return message
 }
 
+// 用户消息进入界面后立即给出本地反馈，不等待任务创建、MQ 投递或首个 SSE 事件。
+const beginAssistantResponse = () => {
+  answerMessageIndex = -1
+  const message = assistantMessage()
+  message.generating = true
+  message.steps.push({ key: 'client:generating', text: 'Generating...', state: 'running' })
+  return message
+}
+
+const clearGeneratingPlaceholder = () => {
+  if (answerMessageIndex < 0) return
+  const message = messages.value[answerMessageIndex]
+  if (!message) return
+  message.generating = false
+  message.steps = (message.steps || []).filter(step => step.key !== 'client:generating')
+}
+
 const appendToken = (content) => {
   if (!content) return
+  clearGeneratingPlaceholder()
   assistantMessage().content += content
 }
 
@@ -125,6 +143,7 @@ const appendToken = (content) => {
 const appendStep = (event, state) => {
   const text = event?.message
   if (!text) return
+  clearGeneratingPlaceholder()
   const key = event?.details?.key || `${event?.type}:${event?.nodeId || ''}`
   const steps = assistantMessage().steps
   const existing = steps.find(step => step.key === key)
@@ -154,13 +173,11 @@ const readFinalResult = async () => {
     if (message) message.content = text
     else addMessage(text, false, 'ai-final')
   }
-  if (parsedResult?.mapPlan?.available) {
-    if (message) {
-      message.mapPlan = parsedResult.mapPlan
-      message.planResult = parsedResult
-    } else if (messages.value.length) {
-      messages.value[messages.value.length - 1].mapPlan = parsedResult.mapPlan
-      messages.value[messages.value.length - 1].planResult = parsedResult
+  if (parsedResult) {
+    const target = message || messages.value[messages.value.length - 1]
+    if (target) {
+      target.planResult = parsedResult
+      if (parsedResult?.mapPlan?.available) target.mapPlan = parsedResult.mapPlan
     }
   }
   return parsedResult
@@ -193,8 +210,13 @@ const subscribeTask = (taskId) => {
       if (status === 'WAITING_USER') {
         waitingForUser = true
         connectionStatus.value = 'waiting'
-        addMessage(event.message || '请补充完成规划所需的信息。', false, 'ai-question', {
-          routeOptions: Array.isArray(event?.details?.routeOptions) ? event.details.routeOptions : []
+        clearGeneratingPlaceholder()
+        const message = assistantMessage()
+        message.type = 'ai-question'
+        message.content = event.message || '请补充完成规划所需的信息。'
+        message.routeOptions = Array.isArray(event?.details?.routeOptions) ? event.details.routeOptions : []
+        message.steps.forEach(step => {
+          if (step.state === 'running') step.state = 'ok'
         })
       } else if (status === 'FAILED') {
         addMessage(event.message || '任务执行失败，请稍后重试。', false, 'ai-error')
@@ -237,11 +259,11 @@ const sendMessage = async (message) => {
   }
   addMessage(message, true, 'user-question')
   connectionStatus.value = 'connecting'
+  beginAssistantResponse()
   try {
     if (activeTaskId && waitingForUser) {
       await resumeAgentTask(activeTaskId, { userClarification: message })
       waitingForUser = false
-      answerMessageIndex = -1
       if (!eventSource) subscribeTask(activeTaskId)
       return
     }
@@ -254,13 +276,15 @@ const sendMessage = async (message) => {
       constraints: {}
     })
     activeTaskId = data.taskId
-    answerMessageIndex = -1
     subscribeTask(activeTaskId)
   } catch (error) {
     connectionStatus.value = 'error'
     activeTaskId = null
     waitingForUser = false
-    addMessage(error?.response?.data?.message || '任务提交失败，请稍后重试。', false, 'ai-error')
+    clearGeneratingPlaceholder()
+    const response = assistantMessage()
+    response.type = 'ai-error'
+    response.content = error?.response?.data?.message || '任务提交失败，请稍后重试。'
   }
 }
 
@@ -268,6 +292,7 @@ const selectRoute = async route => {
   if (!activeTaskId || !waitingForUser || !route) return
   addMessage(`我选择：${route.emoji || '🗺️'} ${route.title}`, true, 'user-question')
   connectionStatus.value = 'connecting'
+  beginAssistantResponse()
   try {
     await resumeAgentTask(activeTaskId, {
       selectedRouteId: route.id,
@@ -277,12 +302,14 @@ const selectRoute = async route => {
       userClarification: `选择${route.title}：${(route.attractions || []).map(item => item.name).join('、')}`
     })
     waitingForUser = false
-    answerMessageIndex = -1
     if (!eventSource) subscribeTask(activeTaskId)
   } catch (error) {
     connectionStatus.value = 'waiting'
     waitingForUser = true
-    addMessage(error?.response?.data?.message || '路线选择提交失败，请重试。', false, 'ai-error')
+    clearGeneratingPlaceholder()
+    const response = assistantMessage()
+    response.type = 'ai-error'
+    response.content = error?.response?.data?.message || '路线选择提交失败，请重试。'
   }
 }
 

@@ -34,6 +34,15 @@ class TravelRouteSelectionServiceTest {
     }
 
     @Test
+    void genericRoutePhraseShouldStillAskUserToChooseARealPoiRoute() {
+        var decision = service.decide(spec(List.of("上海旅游路线")), candidates(),
+                Map.of("prompt", "规划一下上海旅游路线"));
+
+        assertThat(decision.waitingForSelection()).isTrue();
+        assertThat(decision.options()).isNotEmpty();
+    }
+
+    @Test
     void selectedRouteShouldResumeWithOnlyItsPoiDomain() {
         var decision = service.decide(spec(List.of()), candidates(), Map.of(
                 "selectedRouteId", "route-2", "selectedAttractionIds", List.of("west-lake", "lingyin")));

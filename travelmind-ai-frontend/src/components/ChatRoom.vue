@@ -13,20 +13,29 @@
           <div class="message-bubble">
             <!-- 模型思考与工具调用过程用小字灰度展示，不与正式回复混在一起 -->
             <div v-if="msg.steps && msg.steps.length" class="message-steps">
-              <div
-                v-for="step in msg.steps"
-                :key="step.key"
-                class="step-line"
-                :class="step.state"
-              >
-                <span class="step-icon">{{ stepIcon(step.state) }}</span>
-                <span class="step-text">{{ step.text }}</span>
+              <div class="step-summary-row">
+                <div class="step-line step-summary" :class="latestStep(msg).state">
+                  <span class="step-icon">{{ stepIcon(latestStep(msg).state) }}</span>
+                  <span class="step-text">{{ latestStep(msg).text }}</span>
+                </div>
+                <button v-if="msg.steps.length > 1" class="steps-toggle" type="button"
+                        @click="toggleSteps(index)">
+                  {{ stepsExpanded(index) ? '收起' : `展开 ${msg.steps.length - 1} 条` }}
+                </button>
+              </div>
+              <div v-if="stepsExpanded(index)" class="steps-history">
+                <div v-for="step in previousSteps(msg)" :key="step.key"
+                     class="step-line" :class="step.state">
+                  <span class="step-icon">{{ stepIcon(step.state) }}</span>
+                  <span class="step-text">{{ step.text }}</span>
+                </div>
               </div>
             </div>
-            <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <RouteOptionsCard v-if="msg.routeOptions?.length" :routes="msg.routeOptions"
                               @select="route => emit('select-route', route)" />
-            <ItineraryPlanCard v-if="msg.planResult?.mapPlan?.available" :result="msg.planResult" />
+            <ItineraryPlanCard v-if="msg.planResult && ['PLAN', 'MODIFY'].includes(msg.planResult.responseType)"
+                               :result="msg.planResult" />
+            <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <TravelMapCard v-if="msg.mapPlan?.available" :map-plan="msg.mapPlan"
                            @change-mode="mode => emit('change-route-mode', mode)" />
             <span v-if="showTyping(index)" class="typing-indicator">▋</span>
@@ -68,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import TravelMapCard from './TravelMapCard.vue'
 import RouteOptionsCard from './RouteOptionsCard.vue'
@@ -94,6 +103,7 @@ const emit = defineEmits(['send-message', 'change-route-mode', 'select-route'])
 
 const inputMessage = ref('')
 const messagesContainer = ref(null)
+const expandedStepGroups = ref(new Set())
 
 // 发送消息
 const sendMessage = () => {
@@ -105,6 +115,15 @@ const sendMessage = () => {
 
 // 步骤状态图标：running 进行中、ok 完成、warn 降级、error 失败
 const stepIcon = (state) => ({ running: '◌', ok: '✓', warn: '!', error: '×' }[state] || '·')
+const latestStep = msg => msg.steps[msg.steps.length - 1]
+const previousSteps = msg => msg.steps.slice(0, -1)
+const stepsExpanded = index => expandedStepGroups.value.has(index)
+const toggleSteps = index => {
+  const next = new Set(expandedStepGroups.value)
+  if (next.has(index)) next.delete(index)
+  else next.add(index)
+  expandedStepGroups.value = next
+}
 
 const showTyping = (index) => (
   props.connectionStatus === 'connecting' && index === props.messages.length - 1
@@ -130,6 +149,12 @@ watch(() => props.messages.length, () => {
 })
 
 watch(() => props.messages.map(m => m.content).join(''), () => {
+  // 一旦正式内容开始输出，过程轨迹自动全部折叠；用户仍可手动再次展开。
+  const next = new Set(expandedStepGroups.value)
+  props.messages.forEach((message, index) => {
+    if (message.content) next.delete(index)
+  })
+  expandedStepGroups.value = next
   scrollToBottom()
 })
 
@@ -258,6 +283,44 @@ onMounted(() => {
   border-radius: 4px;
   padding: 6px 8px;
   margin-bottom: 8px;
+}
+
+.step-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.step-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-summary .step-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps-toggle {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: #687386;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 2px;
+}
+
+.steps-toggle:hover {
+  color: #315fba;
+}
+
+.steps-history {
+  border-top: 1px dashed #d8dce3;
+  margin-top: 5px;
+  padding-top: 5px;
 }
 
 .step-line {

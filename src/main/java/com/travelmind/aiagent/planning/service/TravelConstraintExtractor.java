@@ -24,6 +24,8 @@ public class TravelConstraintExtractor {
             "(?:去|到|目的地[:：]?)\\s*([\\p{IsHan}]{2,8}?)(?=的|玩|游|旅行|[，,\\s\\d]|$)");
     private static final Pattern CHANGED_DESTINATION = Pattern.compile(
             "(?:改去|换去|改成|换成|目的地(?:改成|改为))\\s*([\\p{IsHan}]{2,8}?)(?=玩|游|旅行|[，,。\\s\\d]|$)");
+    private static final Pattern ROUTE_DESTINATION = Pattern.compile(
+            "(?:帮我规划(?:一下)?|规划(?:一下)?|安排(?:一下)?|^)\\s*([\\p{IsHan}]{2,8}?)(?=旅游路线|旅行路线|游玩路线)");
     private static final Pattern NAMED_ATTRACTION = Pattern.compile(
             "([\\p{IsHan}]{1,10}?(?:寺|湖|山|塔|宫|馆|园|街|城|景区|公园|古镇))(?=和|与|及|、|，|,|玩|游|$)");
 
@@ -35,7 +37,7 @@ public class TravelConstraintExtractor {
         boolean destinationFromDraft = Boolean.TRUE.equals(safe.get("_destinationFromDraft"));
         boolean budgetFromDraft = Boolean.TRUE.equals(safe.get("_budgetFromDraft"));
         String changedDestination = modifying ? match(prompt, CHANGED_DESTINATION) : "";
-        String promptDestination = match(prompt, DESTINATION);
+        String promptDestination = firstNonBlank(match(prompt, DESTINATION), match(prompt, ROUTE_DESTINATION));
         String destination = destinationFromDraft
                 ? firstNonBlank(changedDestination, promptDestination, stringValue(safe.get("destination")),
                         stringValue(constraints.get("destination")))
@@ -56,6 +58,12 @@ public class TravelConstraintExtractor {
         List<String> specificAttractions = stringList(firstValue(
                 safe.get("specificAttractions"), constraints.get("specificAttractions")));
         if (specificAttractions.isEmpty()) specificAttractions = namedAttractions(prompt);
+        String resolvedDestination = destination;
+        specificAttractions = specificAttractions.stream()
+                .map(String::trim)
+                .filter(value -> isConcreteAttraction(value, resolvedDestination))
+                .distinct()
+                .toList();
         return new TravelConstraintSpec(
                 stringValue(safe.get("origin")), destination, dateValue(safe.get("startDate")), days, travelers,
                 budget, firstNonBlank(stringValue(constraints.get("currency")), "CNY"),
@@ -88,6 +96,12 @@ public class TravelConstraintExtractor {
         return value.contains("好看的地方") || value.contains("哪里") || value.contains("哪儿")
                 || value.startsWith("海") && value.contains("好看")
                 || value.equals("海边") || value.equals("看海的地方") || value.equals("适合旅行的地方");
+    }
+
+    private static boolean isConcreteAttraction(String value, String destination) {
+        if (value == null || value.isBlank() || value.equals(destination)) return false;
+        return !(value.contains("旅游路线") || value.contains("旅行路线") || value.contains("游玩路线")
+                || value.equals("路线") || value.endsWith("旅游") || value.endsWith("旅行"));
     }
 
     private static int intMatch(String input, Pattern pattern, int fallback) {

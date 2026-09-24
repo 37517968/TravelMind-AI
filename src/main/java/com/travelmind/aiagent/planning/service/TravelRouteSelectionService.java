@@ -38,8 +38,9 @@ public class TravelRouteSelectionService {
         candidates.attractions().stream().map(TravelCandidate::name)
                 .filter(name -> name != null && name.length() >= 2 && userText.contains(name))
                 .forEach(explicitNames::add);
-        if (!explicitNames.isEmpty()) {
-            TravelCandidateSet narrowed = narrow(candidates, Set.of(), explicitNames);
+        Set<String> matchedExplicitNames = matchedNames(candidates.attractions(), explicitNames);
+        if (!matchedExplicitNames.isEmpty()) {
+            TravelCandidateSet narrowed = narrow(candidates, Set.of(), matchedExplicitNames);
             return new SelectionDecision(false, narrowed, List.of(), "user-specified");
         }
 
@@ -105,10 +106,29 @@ public class TravelRouteSelectionService {
 
     private TravelCandidateSet narrow(TravelCandidateSet source, Set<String> ids, Set<String> names) {
         List<TravelCandidate> matched = source.attractions().stream().filter(item -> ids.contains(item.id())
-                || names.stream().anyMatch(name -> item.name().contains(name) || name.contains(item.name()))).toList();
+                || matchesAnyName(item.name(), names)).toList();
         if (matched.isEmpty()) return source;
         return new TravelCandidateSet(source.transports(), source.hotels(), matched, source.restaurants(),
                 source.collectedAt());
+    }
+
+    private Set<String> matchedNames(List<TravelCandidate> attractions, Set<String> names) {
+        Set<String> matched = new LinkedHashSet<>();
+        for (String name : names) {
+            if (attractions.stream().anyMatch(item -> matchesName(item.name(), name))) matched.add(name);
+        }
+        return matched;
+    }
+
+    private boolean matchesAnyName(String candidateName, Set<String> names) {
+        return names.stream().anyMatch(name -> matchesName(candidateName, name));
+    }
+
+    private boolean matchesName(String candidateName, String requestedName) {
+        if (candidateName == null || candidateName.isBlank() || requestedName == null || requestedName.isBlank()) {
+            return false;
+        }
+        return candidateName.contains(requestedName) || requestedName.contains(candidateName);
     }
 
     private Set<String> strings(Object value) {

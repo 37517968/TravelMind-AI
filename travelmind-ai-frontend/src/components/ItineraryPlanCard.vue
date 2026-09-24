@@ -1,6 +1,6 @@
 <template>
   <section v-if="days.length" class="plan-card">
-    <header><span>🗺️</span><div><strong>路线速览</strong><small>{{ result?.mapPlan?.destination }} · {{ stopCount }} 个地点</small></div></header>
+    <header><span>🗺️</span><div><strong>结构化行程表</strong><small>{{ destination }} · {{ stopCount }} 个地点</small></div></header>
     <div v-if="photos.length" class="photo-grid">
       <figure v-for="photo in photos" :key="photo.id">
         <img :src="photo.url" :alt="photo.name" loading="lazy" referrerpolicy="no-referrer" />
@@ -21,7 +21,31 @@
 <script setup>
 import { computed } from 'vue'
 const props = defineProps({ result: { type: Object, default: () => ({}) } })
-const days = computed(() => props.result?.mapPlan?.days || [])
+const destination = computed(() => props.result?.mapPlan?.destination
+  || props.result?.constraintSpec?.destination || '本次行程')
+const days = computed(() => {
+  const mapDays = props.result?.mapPlan?.days || []
+  if (mapDays.length) return mapDays
+
+  const selected = (props.result?.solverResult?.selected || [])
+    .filter(item => item?.type === 'ATTRACTION')
+  if (!selected.length) return []
+  const requestedDays = Math.max(1, Number(props.result?.constraintSpec?.days) || 1)
+  const dayCount = Math.min(requestedDays, selected.length)
+  const size = Math.ceil(selected.length / dayCount)
+  return Array.from({ length: dayCount }, (_, index) => ({
+    day: index + 1,
+    stops: selected.slice(index * size, (index + 1) * size).map((item, stopIndex) => ({
+      order: stopIndex + 1,
+      poiId: item.id,
+      name: item.name,
+      address: item.attributes?.address || item.city,
+      category: item.attributes?.poiType || '景点',
+      photos: item.attributes?.photos || []
+    })),
+    legs: []
+  })).filter(day => day.stops.length)
+})
 const stopCount = computed(() => days.value.reduce((sum, day) => sum + (day.stops?.length || 0), 0))
 const photos = computed(() => days.value.flatMap(day => day.stops || []).map(stop => ({
   id: stop.poiId || stop.name, name: stop.name, url: stop.photos?.[0]?.url

@@ -60,4 +60,14 @@ class TravelConstraintExtractorTest {
 
         assertThat(spec.destination()).isBlank();
     }
+
+    @Test
+    void cityRouteRequestShouldExtractCityWithoutInventingAnAttraction() {
+        var spec = extractor.extract(Map.of(
+                "prompt", "规划一下上海旅游路线",
+                "specificAttractions", java.util.List.of("上海旅游路线")));
+
+        assertThat(spec.destination()).isEqualTo("上海");
+        assertThat(spec.specificAttractions()).isEmpty();
+    }
 }
