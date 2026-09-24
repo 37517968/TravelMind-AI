@@ -28,8 +28,8 @@ class ToolGatewayTest {
 
     @BeforeEach
     void passThroughSentinel() throws Exception {
-        when(sentinel.executeTool(anyString(), anyString(), any())).thenAnswer(invocation ->
-                ((Callable<?>) invocation.getArgument(2)).call());
+        when(sentinel.executeTool(anyString(), anyString(), anyString(), any())).thenAnswer(invocation ->
+                ((Callable<?>) invocation.getArgument(3)).call());
     }
 
     @AfterEach
@@ -84,6 +84,18 @@ class ToolGatewayTest {
 
         assertThat(result.success()).isTrue();
         assertThat(String.valueOf(result.data())).contains("count");
+    }
+
+    @Test
+    void shouldUseDedicatedPerUserQuotaForAmapTools() throws Exception {
+        ToolPolicy amap = new ToolPolicy("amap_maps_search_detail", "MCP", ToolRiskLevel.READ_ONLY,
+                true, false, Duration.ZERO, Duration.ofSeconds(1), 1, 1000, Set.of("CHAT"), 0);
+
+        ToolResult result = gateway.execute(amap, "{\"type\":\"object\"}", "{}",
+                ToolExecutionContext.anonymous(), input -> "{\"status\":\"1\"}");
+
+        assertThat(result.success()).isTrue();
+        verify(sentinel).executeTool(eq("tool.mcp"), eq("tool.user.map"), eq("anonymous"), any());
     }
 
     @Test

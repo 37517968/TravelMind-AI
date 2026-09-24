@@ -14,10 +14,18 @@ import java.util.function.Supplier;
 @Service
 public class SentinelGovernanceService {
     public <T> T executeTool(String resource, String userId, Callable<T> action) throws Exception {
+        return executeTool(resource, "tool.user", userId, action);
+    }
+
+    public <T> T executeTool(String resource, String userQuotaResource, String userId,
+                             Callable<T> action) throws Exception {
         Entry userEntry = null;
         Entry resourceEntry = null;
+        String quotaResource = userQuotaResource == null || userQuotaResource.isBlank()
+                ? "tool.user" : userQuotaResource;
+        String safeUserId = safeUser(userId);
         try {
-            userEntry = SphU.entry("tool.user", EntryType.OUT, 1, safeUser(userId));
+            userEntry = SphU.entry(quotaResource, EntryType.OUT, 1, safeUserId);
             resourceEntry = SphU.entry(resource, EntryType.OUT);
             return action.call();
         } catch (BlockException blocked) {
@@ -27,7 +35,7 @@ public class SentinelGovernanceService {
             throw failure;
         } finally {
             if (resourceEntry != null) resourceEntry.exit();
-            if (userEntry != null) userEntry.exit(1, safeUser(userId));
+            if (userEntry != null) userEntry.exit(1, safeUserId);
         }
     }
 

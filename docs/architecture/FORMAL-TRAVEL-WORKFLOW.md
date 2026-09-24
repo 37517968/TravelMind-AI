@@ -19,12 +19,19 @@ flowchart TD
     INTENT -->|CREATE_PLAN / SUPPLEMENT / NEW_PLAN| EXTRACT[CONSTRAINT_EXTRACTION\nLLM JSON + deterministic fallback]
     INTENT -->|MODIFY_PLAN| BASE[BASE_PLAN_LOADING\n读取 baseTaskId 的不可变快照]
     BASE --> EXTRACT
-    EXTRACT --> CHECK{CONSTRAINT_VALIDATION}
-    CHECK -->|missing| WAIT[WAITING_USER]
+    EXTRACT --> CHECK{CONSTRAINT_VALIDATION\n先确认目的地}
+    CHECK -->|目的地模糊 / 看海偏好| DESTOPT[目的地路线推荐\n三亚 / 厦门 / 青岛等]
+    DESTOPT --> WAIT[WAITING_USER]
+    CHECK -->|missing| WAIT
     WAIT -->|resume / supplementalVersion + 1| EXTRACT
     CHECK -->|complete| CONTEXT[CONTEXT_BUILDING\nES + PGVector + RRF]
     CONTEXT --> CANDIDATES[CANDIDATE_RETRIEVAL\nToolGateway / Local Tool / MCP]
-    CANDIDATES --> SOLVER{CONSTRAINT_SOLVING\nZ3 SMT / JVM fallback}
+    CANDIDATES --> ROUTE{ROUTE_SELECTION\n是否已点名具体景点?}
+    ROUTE -->|未点名| OPTIONS[POI 候选路线卡片]
+    OPTIONS --> WAIT
+    ROUTE -->|已点名或已选择| DETAIL{PLANNING_INPUT_VALIDATION}
+    DETAIL -->|缺预算等条件| WAIT
+    DETAIL -->|complete| SOLVER{CONSTRAINT_SOLVING\nZ3 SMT / JVM fallback}
     SOLVER -->|UNSAT| RELAX[UNSAT core + minimal relaxation]
     RELAX --> WAIT
     SOLVER -->|SAT| MAP[MAP_PLANNING\nPOI详情 + 分段路线 + mapPlan]
@@ -74,6 +81,15 @@ flowchart TD
 才进入 UNSAT core。相应地 `FRESHNESS_RECHECK` 只把「曾确认过可用性」的候选失去可用性判为过期，
 估算候选的不可用作为已知降级放行，最终行程会被要求显式声明哪些实时数据不可用。
 
+## 景点路线选择门
+
+- 约束协议将“景点类型偏好”与 `specificAttractions`（用户明确点名的景点）分开，避免把“海边、拍照、亲子”等偏好误判成具体 POI；
+- 只给出城市而未点名景点时，`ROUTE_SELECTION` 根据知识证据和高德 POI 候选生成多条路线卡片，任务进入 `WAITING_USER`；
+- 前端选择路线后把 `selectedRouteId / selectedAttractionIds / selectedAttractionNames` 提交到同一任务的 `/resume`，新补充版本重新检索并把求解候选域收窄到已选路线；
+- 用户已点名“灵隐寺、西湖”等具体景点时直接绕过路线选择；具体景点逐一通过 POI 搜索核验，然后继续预算、住宿、餐饮和交通规划；
+- “想去海比较好看的地方”等目的地仍模糊的诉求会先展示代表性滨海目的地路线，选择后再进入 POI 核验，而不是把“好看的地方”当作城市名；
+- 最终生成提示词要求使用带 Emoji 的 Markdown 日程表；前端同时使用 `mapPlan` 渲染景区图片、每日站点表和地图路线，图片只采用工具实际返回的安全 URL。
+
 ## 状态与检查点
 
 - `OverAllState` 只保存图路由键 `route / lastNode / taskId`；
@@ -94,7 +110,7 @@ flowchart TD
 
 ## WAITING_USER 闭环
 
-缺少目的地/预算、求解 UNSAT、确定性校验失败或候选过期都会进入 `WAITING_USER`。客户端可提交普通补充字段，也可提交：
+目的地/路线选择/预算缺失、求解 UNSAT、确定性校验失败或候选过期都会进入 `WAITING_USER`。客户端可提交普通补充字段，也可提交：
 
 ```json
 {

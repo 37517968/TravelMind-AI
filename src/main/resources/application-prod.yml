@@ -57,6 +57,7 @@ travel:
     tool-max-concurrency: ${TOOL_MAX_CONCURRENCY:16}
     model-max-concurrency: ${MODEL_MAX_CONCURRENCY:4}
     user-tool-qps: ${USER_TOOL_QPS:5}
+    user-map-tool-qps: ${USER_MAP_TOOL_QPS:20}
   mcp:
     remote:
       enabled: ${MCP_REMOTE_ENABLED:false}

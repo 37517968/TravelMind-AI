@@ -20,6 +20,7 @@ config:
   pgvectorUsername: travel
   otelEndpoint: http://otel-collector.observability.svc.cluster.local:4318/v1/traces
   traceSamplingProbability: "0.10"
+  userMapToolQps: "20"
 
 api:
   replicas: 2

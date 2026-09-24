@@ -24,6 +24,9 @@
               </div>
             </div>
             <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <RouteOptionsCard v-if="msg.routeOptions?.length" :routes="msg.routeOptions"
+                              @select="route => emit('select-route', route)" />
+            <ItineraryPlanCard v-if="msg.planResult?.mapPlan?.available" :result="msg.planResult" />
             <TravelMapCard v-if="msg.mapPlan?.available" :map-plan="msg.mapPlan"
                            @change-mode="mode => emit('change-route-mode', mode)" />
             <span v-if="showTyping(index)" class="typing-indicator">▋</span>
@@ -68,6 +71,8 @@
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import TravelMapCard from './TravelMapCard.vue'
+import RouteOptionsCard from './RouteOptionsCard.vue'
+import ItineraryPlanCard from './ItineraryPlanCard.vue'
 import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps({
@@ -85,7 +90,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['send-message', 'change-route-mode'])
+const emit = defineEmits(['send-message', 'change-route-mode', 'select-route'])
 
 const inputMessage = ref('')
 const messagesContainer = ref(null)
@@ -180,7 +185,10 @@ onMounted(() => {
 
 .ai-message {
   margin-right: auto; /* AI消息靠左 */
+  max-width: 96%;
 }
+
+.ai-message .message-bubble { width: 100%; box-sizing: border-box; }
 
 .avatar {
   width: 36px;

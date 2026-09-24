@@ -90,11 +90,14 @@ public class TravelMapPlanService {
         ResolvedPoi base = fromCandidate(candidate);
         String poiId = Objects.toString(candidate.attributes().getOrDefault("poiId", candidate.id()), "");
         if (facade == null || !facade.hasTool(DETAIL) || poiId.isBlank()) return base;
-        progress(taskId, DETAIL, "RUNNING", "正在补全“" + candidate.name() + "”的地点详情…");
+        String eventKey = "poi:" + poiId;
+        progress(taskId, DETAIL, eventKey, "RUNNING", "正在补全“" + candidate.name() + "”的地点详情…", null);
         ToolResult result = facade.invokeTyped(DETAIL, Map.of("id", poiId), NODE, String.valueOf(taskId), userId);
         ResolvedPoi detailed = amap.pois(result).stream().findFirst().map(this::fromAmap).orElse(null);
-        progress(taskId, DETAIL, result.success() ? "SUCCEEDED" : "DEGRADED",
-                result.success() ? "地点详情补全完成" : "地点详情暂时不可用，保留搜索结果");
+        progress(taskId, DETAIL, eventKey, result.success() ? "SUCCEEDED" : "DEGRADED",
+                result.success() ? "“" + candidate.name() + "”地点详情补全完成"
+                        : "“" + candidate.name() + "”详情暂时不可用，保留搜索结果",
+                result.errorCode());
         return merge(base, detailed);
     }
 
@@ -114,13 +117,17 @@ public class TravelMapPlanService {
             args.put("city", city);
             args.put("cityd", city);
         }
-        progress(taskId, tool, "RUNNING", "正在规划“" + origin.name + "”到“" + destination.name + "”的路线…");
+        String eventKey = "route:" + origin.id + ":" + destination.id;
+        progress(taskId, tool, eventKey, "RUNNING",
+                "正在规划“" + origin.name + "”到“" + destination.name + "”的路线…", null);
         ToolResult result = facade.invokeTyped(tool, args, NODE, String.valueOf(taskId), userId);
         AmapPayloadParser.RouteData route = amap.route(result).orElse(null);
-        progress(taskId, tool, route == null ? "DEGRADED" : "SUCCEEDED",
-                route == null ? "路线详情暂时不可用，地图将连接景点位置" : "分段路线规划完成");
+        progress(taskId, tool, eventKey, route == null ? "DEGRADED" : "SUCCEEDED",
+                route == null ? "路线详情暂时不可用，地图将连接景点位置" : "分段路线规划完成",
+                result.errorCode());
         if (route == null) {
-            warnings.add(origin.name + "至" + destination.name + "未取得道路折线");
+            String reason = result.errorCode() == null ? "ROUTE_DATA_EMPTY" : result.errorCode();
+            warnings.add(origin.name + "至" + destination.name + "未取得道路折线（" + reason + "）");
             return new TravelMapPlan.RouteLeg(origin.id, destination.id, mode, 0, 0, fallback, List.of());
         }
         return new TravelMapPlan.RouteLeg(origin.id, destination.id, mode, route.distanceMeters(),
@@ -191,9 +198,14 @@ public class TravelMapPlanService {
 
     private String coordinate(TravelMapPlan.GeoPoint point) { return point.lng() + "," + point.lat(); }
 
-    private void progress(Long taskId, String tool, String status, String message) {
-        if (events != null && taskId != null) events.publish(taskId, "TOOL", NODE, status, message, 65,
-                Map.of("key", "tool:" + tool, "tool", tool));
+    private void progress(Long taskId, String tool, String instanceKey, String status, String message,
+                          String errorCode) {
+        if (events == null || taskId == null) return;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("key", "tool:" + tool + ":" + instanceKey);
+        details.put("tool", tool);
+        if (errorCode != null && !errorCode.isBlank()) details.put("errorCode", errorCode);
+        events.publish(taskId, "TOOL", NODE, status, message, 65, details);
     }
 
     private record ResolvedPoi(String id, String name, String address, String category,

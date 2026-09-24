@@ -17,3 +17,4 @@ data:
   PGVECTOR_USERNAME: {{ .Values.config.pgvectorUsername | quote }}
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
   OTEL_TRACES_SAMPLER_PROBABILITY: {{ .Values.config.traceSamplingProbability | quote }}
+  USER_MAP_TOOL_QPS: {{ .Values.config.userMapToolQps | quote }}

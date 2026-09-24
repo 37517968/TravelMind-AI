@@ -77,6 +77,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             resultPayload.put("constraintSpec", state.getData().get("constraintSpec"));
             resultPayload.put("solverResult", state.getData().get("solverResult"));
             resultPayload.put("mapPlan", state.getData().get("mapPlan"));
+            resultPayload.put("selectedRouteId", state.getData().get("selectedRouteId"));
             resultPayload.put("validationResult", state.getData().get("validationResult"));
             resultPayload.put("freshnessResult", state.getData().get("freshnessResult"));
             resultPayload.put("workflowVersion", task.getWorkflowVersion());
@@ -262,6 +263,8 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
         if (nodeId.startsWith(TravelPlanningGraphFactory.CHECK)) return 14;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CONTEXT)) return 25;
         if (nodeId.startsWith(TravelPlanningGraphFactory.CANDIDATES)) return 40;
+        if (nodeId.startsWith(TravelPlanningGraphFactory.ROUTE_SELECTION)) return 46;
+        if (nodeId.startsWith(TravelPlanningGraphFactory.DETAILS_CHECK)) return 50;
         if (nodeId.startsWith(TravelPlanningGraphFactory.SOLVE)) return 58;
         if (nodeId.startsWith(TravelPlanningGraphFactory.RELAX)) return 65;
         if (nodeId.startsWith(TravelPlanningGraphFactory.GENERATE)) return 78;

@@ -238,6 +238,8 @@ travel:
     tool-max-concurrency: 16
     model-max-concurrency: 4
     user-tool-qps: 5
+    # 地图规划会连续执行 POI 搜索、详情补全和分段路线，使用独立的较高配额。
+    user-map-tool-qps: 20
   mcp:
     remote:
       enabled: ${MCP_REMOTE_ENABLED:false}

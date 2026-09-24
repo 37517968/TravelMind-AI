@@ -52,8 +52,17 @@ public class TravelCandidateCollector {
         ToolResult hotels = searchPoi(facade, spec.destination(), "酒店", taskId, userId);
         String attractionKeyword = spec.requiredAttractionTags().isEmpty()
                 ? "景点" : String.join(" ", spec.requiredAttractionTags());
-        ToolResult attractions = searchPoi(facade, spec.destination(), attractionKeyword, taskId, userId);
-        ToolResult nearbyAttractions = nearbyPoi(facade, attractions, attractionKeyword, taskId, userId);
+        List<ToolResult> attractionResults = new ArrayList<>();
+        if (spec.specificAttractions().isEmpty()) {
+            ToolResult attractions = searchPoi(facade, spec.destination(), attractionKeyword, taskId, userId);
+            attractionResults.add(attractions);
+            attractionResults.add(nearbyPoi(facade, attractions, attractionKeyword, taskId, userId));
+        } else {
+            // 用户明确点名的景点逐一精确搜索，不再混入默认“热门景点”路线。
+            for (String attraction : spec.specificAttractions()) {
+                attractionResults.add(searchPoi(facade, spec.destination(), attraction, taskId, userId));
+            }
+        }
         String restaurantKeyword = spec.requiredCuisineTags().isEmpty()
                 ? "美食" : String.join(" ", spec.requiredCuisineTags());
         ToolResult restaurants = searchPoi(facade, spec.destination(), restaurantKeyword, taskId, userId);
@@ -64,13 +73,13 @@ public class TravelCandidateCollector {
                 Map.of("mode", defaultMode(spec), "priceConfidence", "ESTIMATED")));
         List<TravelCandidate> hotelList = toolCandidates(hotels, TravelCandidate.CandidateType.HOTEL,
                 spec.destination() + "住宿候选", 40000, List.of("住宿"), spec.travelers(), now);
-        List<TravelCandidate> attractionList = mergeCandidates(
-                toolCandidates(attractions, TravelCandidate.CandidateType.ATTRACTION,
-                spec.destination() + "景点候选", 8000,
-                        spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now),
-                amap.pois(nearbyAttractions).isEmpty() ? List.of() : toolCandidates(nearbyAttractions, TravelCandidate.CandidateType.ATTRACTION,
-                        spec.destination() + "周边景点候选", 8000,
-                        spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now));
+        List<List<TravelCandidate>> attractionGroups = new ArrayList<>();
+        for (ToolResult result : attractionResults) {
+            attractionGroups.add(toolCandidates(result, TravelCandidate.CandidateType.ATTRACTION,
+                    spec.destination() + "景点候选", 8000,
+                    spec.requiredAttractionTags().isEmpty() ? List.of("通用景点") : spec.requiredAttractionTags(), 0, now));
+        }
+        List<TravelCandidate> attractionList = mergeCandidateGroups(attractionGroups);
         List<TravelCandidate> restaurantList = toolCandidates(restaurants, TravelCandidate.CandidateType.RESTAURANT,
                 spec.destination() + "餐厅候选", 6000,
                 spec.requiredCuisineTags().isEmpty() ? List.of("本地美食") : spec.requiredCuisineTags(), 0, now);
@@ -106,21 +115,25 @@ public class TravelCandidateCollector {
     private ToolResult invoke(TravelToolFacade facade, String name, Map<String, Object> args, Long taskId, String userId) {
         String label = TOOL_LABELS.getOrDefault(name, name);
         if (facade == null) {
-            progress(taskId, name, "DEGRADED", label + "查询能力未开启，改用参考估算");
+            progress(taskId, name, args, "DEGRADED", label + "查询能力未开启，改用参考估算", "TOOLS_UNAVAILABLE");
             return unavailable(name);
         }
-        progress(taskId, name, "RUNNING", "正在查询" + label + "实时信息…");
+        progress(taskId, name, args, "RUNNING", "正在查询" + label + "实时信息…", null);
         ToolResult result = facade.invokeTyped(name, args, RETRIEVAL_NODE, String.valueOf(taskId), userId);
-        progress(taskId, name, result.success() ? "SUCCEEDED" : "DEGRADED", result.success()
+        progress(taskId, name, args, result.success() ? "SUCCEEDED" : "DEGRADED", result.success()
                 ? label + "信息查询完成"
-                : label + "暂时查不到，已改用参考估算");
+                : label + "暂时查不到，已改用参考估算", result.errorCode());
         return result;
     }
 
-    private void progress(Long taskId, String toolName, String status, String message) {
+    private void progress(Long taskId, String toolName, Map<String, Object> args, String status, String message,
+                          String errorCode) {
         if (eventStore == null || taskId == null) return;
-        eventStore.publish(taskId, "TOOL", RETRIEVAL_NODE, status, message, 40,
-                Map.of("key", "tool:" + toolName, "tool", toolName));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("key", "tool:" + toolName + ":" + Integer.toUnsignedString(args.hashCode(), 36));
+        details.put("tool", toolName);
+        if (errorCode != null && !errorCode.isBlank()) details.put("errorCode", errorCode);
+        eventStore.publish(taskId, "TOOL", RETRIEVAL_NODE, status, message, 40, details);
     }
 
     private List<TravelCandidate> toolCandidates(ToolResult result, TravelCandidate.CandidateType type,
@@ -158,8 +171,7 @@ public class TravelCandidateCollector {
         return List.copyOf(values);
     }
 
-    @SafeVarargs
-    private final List<TravelCandidate> mergeCandidates(List<TravelCandidate>... groups) {
+    private List<TravelCandidate> mergeCandidateGroups(List<List<TravelCandidate>> groups) {
         Map<String, TravelCandidate> unique = new LinkedHashMap<>();
         for (List<TravelCandidate> group : groups)
             for (TravelCandidate candidate : group) unique.putIfAbsent(candidate.id(), candidate);

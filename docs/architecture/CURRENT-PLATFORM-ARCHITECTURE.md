@@ -162,7 +162,7 @@ sequenceDiagram
     end
     H->>DB: 保存带 supplementalVersion 的节点 Checkpoint
 
-    alt 缺少目的地或预算
+    alt 目的地缺失、路线待选择或预算缺失
         H->>DB: CONSTRAINT_VALIDATION -> WAITING_USER
         H->>R: waiting_user 进度事件
         R-->>A: Stream Record
@@ -174,6 +174,13 @@ sequenceDiagram
     else 约束完整
         H->>G: CONTEXT_BUILDING，Hybrid RAG 获取证据
         H->>G: CANDIDATE_RETRIEVAL，经 ToolGateway 获取类型化候选
+        alt 用户未点名具体景点
+            H->>C: ROUTE_SELECTION，通过 SSE 返回多条 POI 路线卡片
+            C->>A: /resume + selectedRouteId/selectedAttractionIds
+            H->>H: 收窄候选域后进入详细规划
+        else 已点名灵隐寺/西湖等景点
+            H->>H: 跳过路线选择，逐一核验指定 POI
+        end
     H->>P: CONSTRAINT_SOLVING，Z3 或 JVM Solver
     H->>G: MAP_PLANNING，POI 详情与相邻景点分段路线
         alt UNSAT / UNKNOWN

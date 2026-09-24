@@ -79,9 +79,12 @@ class ExplicitTravelWorkflowEngineTest {
             errorCode = failure.getErrorCode();
         }
 
-        // 桩模型不可用只应影响 ITINERARY_GENERATION，不应表现为工作流状态丢失。
-        assertThat(errorCode).isEqualTo("MODEL_CALL_FAILED");
+        // 未指定具体景点时会在正式生成前进入路线选择，不应表现为工作流状态丢失。
+        assertThat(errorCode).isNull();
         assertThat(fixture.startedNodes()).contains(TravelPlanningGraphFactory.CONTEXT + "_v1");
+        assertThat(fixture.startedNodes()).contains(TravelPlanningGraphFactory.ROUTE_SELECTION + "_v1");
+        verify(fixture.tasks()).markWaiting(eq(13L), startsWith(TravelPlanningGraphFactory.ROUTE_SELECTION),
+                contains("请选择一条"));
         Map<String, Object> stateAtContext = (Map<String, Object>) fixture.stateSnapshots()
                 .get(TravelPlanningGraphFactory.CONTEXT + "_v1");
         assertThat((Map<String, Object>) stateAtContext.get("data")).containsKey("constraintSpec");

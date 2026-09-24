@@ -28,6 +28,8 @@ public class TravelPlanningGraphFactory {
     public static final String CHECK = "CONSTRAINT_VALIDATION";
     public static final String CONTEXT = "CONTEXT_BUILDING";
     public static final String CANDIDATES = "CANDIDATE_RETRIEVAL";
+    public static final String ROUTE_SELECTION = "ROUTE_SELECTION";
+    public static final String DETAILS_CHECK = "PLANNING_INPUT_VALIDATION";
     public static final String SOLVE = "CONSTRAINT_SOLVING";
     public static final String MAP = "MAP_PLANNING";
     public static final String RELAX = "UNSAT_RELAXATION";
@@ -42,6 +44,7 @@ public class TravelPlanningGraphFactory {
             Map.entry(BASE_PLAN, "读取上一版计划"),
             Map.entry(EXTRACT, "理解旅行要求"), Map.entry(CHECK, "核对信息是否齐全"),
             Map.entry(CONTEXT, "查阅目的地资料"), Map.entry(CANDIDATES, "查询可订的住宿景点"),
+            Map.entry(ROUTE_SELECTION, "准备景点路线选择"), Map.entry(DETAILS_CHECK, "核对详细规划条件"),
             Map.entry(SOLVE, "编排预算与行程"), Map.entry(RELAX, "给出调整建议"),
             Map.entry(MAP, "生成景点地图与路线"),
             Map.entry(GENERATE, "生成行程方案"), Map.entry(VALIDATE, "检查方案质量"),
@@ -68,6 +71,8 @@ public class TravelPlanningGraphFactory {
             add(graph, CHECK, nodeRunner);
             add(graph, CONTEXT, nodeRunner);
             add(graph, CANDIDATES, nodeRunner);
+            add(graph, ROUTE_SELECTION, nodeRunner);
+            add(graph, DETAILS_CHECK, nodeRunner);
             add(graph, SOLVE, nodeRunner);
             add(graph, MAP, nodeRunner);
             add(graph, RELAX, nodeRunner);
@@ -89,7 +94,13 @@ public class TravelPlanningGraphFactory {
                             "CONTINUE", CONTEXT,
                             "WAITING", END))
                     .addEdge(CONTEXT, CANDIDATES)
-                    .addEdge(CANDIDATES, SOLVE)
+                    .addEdge(CANDIDATES, ROUTE_SELECTION)
+                    .addConditionalEdges(ROUTE_SELECTION, edge_async(state -> state.value("route", "WAITING")), Map.of(
+                            "CONTINUE", DETAILS_CHECK,
+                            "WAITING", END))
+                    .addConditionalEdges(DETAILS_CHECK, edge_async(state -> state.value("route", "WAITING")), Map.of(
+                            "CONTINUE", SOLVE,
+                            "WAITING", END))
                     .addConditionalEdges(SOLVE, edge_async(state -> state.value("route", "UNKNOWN")), Map.of(
                             "SAT", MAP,
                             "UNSAT", RELAX,

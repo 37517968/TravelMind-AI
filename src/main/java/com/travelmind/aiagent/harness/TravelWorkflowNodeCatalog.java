@@ -8,6 +8,7 @@ import com.travelmind.aiagent.planning.model.TravelCandidateSet;
 import com.travelmind.aiagent.planning.model.TravelConstraintSpec;
 import com.travelmind.aiagent.planning.model.TravelSolverResult;
 import com.travelmind.aiagent.planning.model.TravelMapPlan;
+import com.travelmind.aiagent.planning.model.TravelRouteOption;
 import com.travelmind.aiagent.planning.model.TravelValidationResult;
 import com.travelmind.aiagent.planning.service.TravelCandidateCollector;
 import com.travelmind.aiagent.planning.service.TravelConstraintExtractor;
@@ -15,6 +16,7 @@ import com.travelmind.aiagent.planning.service.TravelConstraintSolver;
 import com.travelmind.aiagent.planning.service.TravelFreshnessValidator;
 import com.travelmind.aiagent.planning.service.TravelPlanValidator;
 import com.travelmind.aiagent.planning.service.TravelMapPlanService;
+import com.travelmind.aiagent.planning.service.TravelRouteSelectionService;
 import com.travelmind.aiagent.rag.TravelKnowledgeIndexService;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
 import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
@@ -52,6 +54,7 @@ public class TravelWorkflowNodeCatalog {
     private final TravelCandidateCollector candidateCollector;
     private final TravelConstraintSolver constraintSolver;
     private final TravelMapPlanService mapPlanService;
+    private final TravelRouteSelectionService routeSelectionService;
     private final TravelPlanValidator planValidator;
     private final TravelFreshnessValidator freshnessValidator;
     private static final String FALLBACK_CHAT_REPLY = """
@@ -69,6 +72,7 @@ public class TravelWorkflowNodeCatalog {
                                      TravelCandidateCollector candidateCollector,
                                      TravelConstraintSolver constraintSolver,
                                      TravelMapPlanService mapPlanService,
+                                     TravelRouteSelectionService routeSelectionService,
                                      TravelPlanValidator planValidator,
                                      TravelFreshnessValidator freshnessValidator) {
         this.chatModel = chatModel;
@@ -83,6 +87,7 @@ public class TravelWorkflowNodeCatalog {
         this.candidateCollector = candidateCollector;
         this.constraintSolver = constraintSolver;
         this.mapPlanService = mapPlanService;
+        this.routeSelectionService = routeSelectionService;
         this.planValidator = planValidator;
         this.freshnessValidator = freshnessValidator;
     }
@@ -97,6 +102,7 @@ public class TravelWorkflowNodeCatalog {
                 new TravelConstraintExtractor(), new TravelCandidateCollector(toolProvider, objectMapper, eventStore),
                 new com.travelmind.aiagent.planning.service.DeterministicTravelConstraintSolver(),
                 new TravelMapPlanService(toolProvider, objectMapper, eventStore),
+                new TravelRouteSelectionService(),
                 new TravelPlanValidator(), new TravelFreshnessValidator());
     }
 
@@ -112,6 +118,8 @@ public class TravelWorkflowNodeCatalog {
             case TravelPlanningGraphFactory.CHECK -> node(physicalId, 0, this::validateConstraints);
             case TravelPlanningGraphFactory.CONTEXT -> node(physicalId, 0, this::buildFormalContext);
             case TravelPlanningGraphFactory.CANDIDATES -> node(physicalId, 1, this::retrieveCandidates);
+            case TravelPlanningGraphFactory.ROUTE_SELECTION -> node(physicalId, 0, this::selectAttractionRoute);
+            case TravelPlanningGraphFactory.DETAILS_CHECK -> node(physicalId, 0, this::validatePlanningInputs);
             case TravelPlanningGraphFactory.SOLVE -> node(physicalId, 0, this::solveConstraints);
             case TravelPlanningGraphFactory.MAP -> node(physicalId, 0, this::buildMapPlan);
             case TravelPlanningGraphFactory.RELAX -> node(physicalId, 0, this::buildRelaxationQuestion);
@@ -251,8 +259,10 @@ public class TravelWorkflowNodeCatalog {
                          只把用户自己说过的信息当作事实；已确认草稿作为默认值，当前请求明确给出的新值优先。
                          Schema: {"origin":"","destination":"","startDate":"yyyy-MM-dd|null","days":3,
                          "travelers":1,"budget":3000,"constraints":{"allowedTransportModes":[],
-                         "requiredAttractionTags":[],"requiredCuisineTags":[],"hotelMaxNightly":null,
-                         "softPreferences":{}}}
+                          "requiredAttractionTags":[],"specificAttractions":[],"requiredCuisineTags":[],"hotelMaxNightly":null,
+                          "softPreferences":{}}}
+                          specificAttractions 只填写用户明确点名的具体景点，例如“灵隐寺”“西湖”；
+                          “海边”“古镇”“亲子”“拍照”等类别或偏好只能放 requiredAttractionTags，不能冒充具体景点。
                          已确认草稿：%s
                          最近用户原话：%s
                          当前用户请求：%s
@@ -314,6 +324,7 @@ public class TravelWorkflowNodeCatalog {
         constraints.put("currency", base.currency());
         constraints.put("allowedTransportModes", base.allowedTransportModes());
         constraints.put("requiredAttractionTags", base.requiredAttractionTags());
+        constraints.put("specificAttractions", base.specificAttractions());
         constraints.put("requiredCuisineTags", base.requiredCuisineTags());
         if (base.hotelMaxNightlyCents() != null)
             constraints.put("hotelMaxNightly", base.hotelMaxNightlyCents() / 100D);
@@ -357,14 +368,39 @@ public class TravelWorkflowNodeCatalog {
 
     private NodeExecutionResult validateConstraints(WorkflowState state) {
         TravelConstraintSpec spec = value(state, "constraintSpec", TravelConstraintSpec.class);
-        List<String> missing = spec.missingRequiredFields();
-        if (missing.isEmpty()) return NodeExecutionResult.builder()
+        if (!spec.destination().isBlank()) return NodeExecutionResult.builder()
                 .data(Map.of("constraintsValidated", true, "workflowRoute", "CONTINUE")).build();
-        String question = missing.contains("destination")
-                ? "请补充本次旅行的目的地。"
-                : "请补充本次旅行可接受的总预算（人民币元）。";
+        List<TravelRouteOption> destinationOptions = destinationOptions(
+                TravelIntentRouter.currentInput(state.getRequest()));
+        if (!destinationOptions.isEmpty()) return NodeExecutionResult.builder().status("WAITING_USER").data(Map.of(
+                "workflowRoute", "WAITING", "waitingReason", "DESTINATION_SELECTION",
+                "routeOptions", destinationOptions,
+                "clarificationQuestion", "想看海的话，可以先从下面几条代表性路线中选一条；选定目的地后，我会再通过 POI 补全景点并安排交通、餐饮和住宿。"
+        )).build();
         return NodeExecutionResult.builder().status("WAITING_USER").data(Map.of(
-                "workflowRoute", "WAITING", "missingFields", missing, "clarificationQuestion", question)).build();
+                "workflowRoute", "WAITING", "missingFields", List.of("destination"),
+                "clarificationQuestion", "请补充本次旅行的目的地。")).build();
+    }
+
+    private List<TravelRouteOption> destinationOptions(String input) {
+        String value = input == null ? "" : input;
+        if (!(value.contains("海") || value.contains("海边") || value.contains("看海"))) return List.of();
+        return List.of(
+                destinationRoute("destination-sanya", "三亚", "热带海湾度假线", "🏝️",
+                        "适合偏爱沙滩、海景和慢节奏度假的旅行者。", "亚龙湾", "大东海", "天涯海角"),
+                destinationRoute("destination-xiamen", "厦门", "海岛人文漫游线", "🌊",
+                        "海岸风光与城市人文兼顾，整体步调轻松。", "鼓浪屿", "环岛路", "曾厝垵"),
+                destinationRoute("destination-qingdao", "青岛", "山海城市风光线", "⛵",
+                        "适合喜欢海滨建筑、城市漫步和北方海景的旅行者。", "栈桥", "八大关", "小麦岛公园")
+        );
+    }
+
+    private TravelRouteOption destinationRoute(String id, String destination, String title, String emoji,
+                                                String summary, String... attractions) {
+        List<TravelRouteOption.RouteAttraction> stops = java.util.Arrays.stream(attractions)
+                .map(name -> new TravelRouteOption.RouteAttraction(destination + ":" + name, name, destination, ""))
+                .toList();
+        return new TravelRouteOption(id, destination, title, emoji, summary, stops);
     }
 
     private NodeExecutionResult buildFormalContext(WorkflowState state) {
@@ -383,6 +419,38 @@ public class TravelWorkflowNodeCatalog {
         TravelCandidateSet candidates = candidateCollector.collect(state.getTaskId(),
                 Objects.toString(state.getRequest().get("userId"), "anonymous"), spec);
         return NodeExecutionResult.builder().data(Map.of("candidateSet", candidates)).build();
+    }
+
+    private NodeExecutionResult selectAttractionRoute(WorkflowState state) {
+        TravelConstraintSpec spec = value(state, "constraintSpec", TravelConstraintSpec.class);
+        TravelCandidateSet candidates = value(state, "candidateSet", TravelCandidateSet.class);
+        TravelRouteSelectionService.SelectionDecision decision =
+                routeSelectionService.decide(spec, candidates, state.getRequest());
+        if (decision.waitingForSelection()) {
+            return NodeExecutionResult.builder().status("WAITING_USER").data(Map.of(
+                    "workflowRoute", "WAITING",
+                    "waitingReason", "ROUTE_SELECTION",
+                    "routeOptions", decision.options(),
+                    "clarificationQuestion", "我先根据目的地资料和实时 POI 整理了几条景点路线。请选择一条，我再为你细排交通、餐饮和住宿。"
+            )).build();
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("candidateSet", decision.candidates());
+        data.put("workflowRoute", "CONTINUE");
+        if (decision.selectedRouteId() != null) data.put("selectedRouteId", decision.selectedRouteId());
+        return NodeExecutionResult.builder().data(data).build();
+    }
+
+    private NodeExecutionResult validatePlanningInputs(WorkflowState state) {
+        TravelConstraintSpec spec = value(state, "constraintSpec", TravelConstraintSpec.class);
+        List<String> missing = spec.missingRequiredFields().stream()
+                .filter(field -> !"destination".equals(field)).toList();
+        if (missing.isEmpty()) return NodeExecutionResult.builder()
+                .data(Map.of("planningInputsValidated", true, "workflowRoute", "CONTINUE")).build();
+        return NodeExecutionResult.builder().status("WAITING_USER").data(Map.of(
+                "workflowRoute", "WAITING", "missingFields", missing,
+                "clarificationQuestion", "路线已确定。请再告诉我本次旅行可接受的总预算（人民币元），我会继续安排交通、餐饮和住宿。"
+        )).build();
     }
 
     private NodeExecutionResult solveConstraints(WorkflowState state) {
@@ -486,6 +554,8 @@ public class TravelWorkflowNodeCatalog {
                     """ : """
                     请只依据以下已核对过的材料，生成可直接执行的中文旅行方案。
                     """) + """
+                    输出使用清晰的 Markdown：标题和重点可搭配少量旅行 Emoji；先给行程概览，随后每天使用表格，
+                    表格至少包含“时间、地点/活动、交通、餐饮、参考费用”五列，最后汇总住宿、总预算和注意事项。
                     必须逐日列出时间、地点、活动和费用；不得替换材料中已选定的项目，不得虚构库存、价格或余票。
                     若"排定结果.实时数据限制"不为空，请在开头用一到两句自然的话提醒用户这类信息暂时查不到、方案仅供参考；为空时不要提及任何数据限制。
                     全程使用普通用户能读懂的自然语言：不得出现字段名、JSON、代码、英文标识、错误码、类名或求解器名称，也不要复述本要求。
@@ -521,6 +591,7 @@ public class TravelWorkflowNodeCatalog {
         brief.put("住宿每晚上限元", spec.hotelMaxNightlyCents() == null ? "不限" : yuan(spec.hotelMaxNightlyCents()));
         brief.put("可接受交通方式", spec.allowedTransportModes());
         brief.put("必玩类型", spec.requiredAttractionTags());
+        brief.put("用户点名景点", spec.specificAttractions());
         brief.put("必吃类型", spec.requiredCuisineTags());
         return brief;
     }

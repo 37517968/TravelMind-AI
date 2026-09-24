@@ -22,6 +22,7 @@ public class SentinelGovernanceConfiguration {
     @Value("${travel.governance.tool-max-concurrency:16}") private double toolConcurrency;
     @Value("${travel.governance.model-max-concurrency:4}") private double modelConcurrency;
     @Value("${travel.governance.user-tool-qps:5}") private double userToolQps;
+    @Value("${travel.governance.user-map-tool-qps:20}") private double userMapToolQps;
 
     @PostConstruct
     public void loadRules() {
@@ -52,6 +53,8 @@ public class SentinelGovernanceConfiguration {
 
         ParamFlowRule userRule = new ParamFlowRule("tool.user")
                 .setParamIdx(0).setCount(userToolQps).setDurationInSec(1);
-        ParamFlowRuleManager.loadRules(List.of(userRule));
+        ParamFlowRule mapUserRule = new ParamFlowRule("tool.user.map")
+                .setParamIdx(0).setCount(userMapToolQps).setDurationInSec(1);
+        ParamFlowRuleManager.loadRules(List.of(userRule, mapUserRule));
     }
 }

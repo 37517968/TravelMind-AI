@@ -13,7 +13,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
-import java.util.regex.Pattern;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -109,7 +108,7 @@ public class ToolGateway {
                         return result;
                     } catch (Exception failure) {
                         last = failure;
-                        if (attempts < allowedAttempts) Thread.sleep(Math.min(500, 100L << (attempts - 1)));
+                        if (attempts < allowedAttempts) Thread.sleep(retryDelayMillis(failure, attempts));
                     }
                 }
                 throw last == null ? new IllegalStateException("Tool execution failed") : last;
@@ -137,7 +136,7 @@ public class ToolGateway {
         Future<String> future;
         try {
             future = executor.submit(() -> sentinel.executeTool("MCP".equals(policy.source()) ? "tool.mcp" : "tool." + policy.toolName(),
-                    context.userId(), () -> invocation.call(arguments)));
+                    userQuotaResource(policy), context.userId(), () -> invocation.call(arguments)));
         } catch (RejectedExecutionException overloaded) {
             throw new RejectedExecutionException("工具隔离线程池已满", overloaded);
         }
@@ -246,6 +245,20 @@ public class ToolGateway {
     private boolean retryable(Exception failure) {
         return failure instanceof ToolTimeoutException || failure instanceof RejectedExecutionException
                 || failure instanceof SentinelGovernanceService.GovernanceBlockedException;
+    }
+
+    /** 地图节点会连续完成检索、详情补全和分段路线规划，使用独立的用户级配额。 */
+    private String userQuotaResource(ToolPolicy policy) {
+        return policy.toolName() != null && policy.toolName().startsWith("amap_")
+                ? "tool.user.map" : "tool.user";
+    }
+
+    /** Sentinel 采用秒级窗口；被限流后必须跨过当前窗口再重试。 */
+    private long retryDelayMillis(Exception failure, int attempts) {
+        if (failure instanceof SentinelGovernanceService.GovernanceBlockedException) {
+            return 1_100L + ThreadLocalRandom.current().nextLong(100L);
+        }
+        return Math.min(500L, 100L << (attempts - 1));
     }
 
     private String safeMessage(Exception failure) {

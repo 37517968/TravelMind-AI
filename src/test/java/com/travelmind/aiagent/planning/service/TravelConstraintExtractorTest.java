@@ -45,4 +45,19 @@ class TravelConstraintExtractorTest {
         assertThat(spec.destination()).isEqualTo("杭州");
         assertThat(spec.complete()).isTrue();
     }
+
+    @Test
+    void shouldSeparateNamedAttractionsFromDestination() {
+        var spec = extractor.extract(Map.of("prompt", "去杭州的灵隐寺和西湖玩，预算3000元"));
+
+        assertThat(spec.destination()).isEqualTo("杭州");
+        assertThat(spec.specificAttractions()).containsExactly("灵隐寺", "西湖");
+    }
+
+    @Test
+    void vagueSeasidePreferenceShouldNotBecomeFakeCityName() {
+        var spec = extractor.extract(Map.of("prompt", "想去海比较好看的地方玩"));
+
+        assertThat(spec.destination()).isBlank();
+    }
 }

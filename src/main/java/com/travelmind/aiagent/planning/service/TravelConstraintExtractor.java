@@ -21,9 +21,11 @@ public class TravelConstraintExtractor {
             "(?:预算(?:改成|调整为|改为|提高到|降到)?|不超过|控制在)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:元|块)?");
     private static final Pattern TRAVELERS = Pattern.compile("([一二两三四五六七八九十\\d]{1,2})\\s*(?:个)?(?:人|位)");
     private static final Pattern DESTINATION = Pattern.compile(
-            "(?:去|到|目的地[:：]?)\\s*([\\p{IsHan}]{2,8}?)(?=玩|游|旅行|[，,\\s\\d]|$)");
+            "(?:去|到|目的地[:：]?)\\s*([\\p{IsHan}]{2,8}?)(?=的|玩|游|旅行|[，,\\s\\d]|$)");
     private static final Pattern CHANGED_DESTINATION = Pattern.compile(
             "(?:改去|换去|改成|换成|目的地(?:改成|改为))\\s*([\\p{IsHan}]{2,8}?)(?=玩|游|旅行|[，,。\\s\\d]|$)");
+    private static final Pattern NAMED_ATTRACTION = Pattern.compile(
+            "([\\p{IsHan}]{1,10}?(?:寺|湖|山|塔|宫|馆|园|街|城|景区|公园|古镇))(?=和|与|及|、|，|,|玩|游|$)");
 
     public TravelConstraintSpec extract(Map<String, Object> request) {
         Map<String, Object> safe = request == null ? Map.of() : request;
@@ -39,6 +41,7 @@ public class TravelConstraintExtractor {
                         stringValue(constraints.get("destination")))
                 : firstNonBlank(changedDestination, stringValue(safe.get("destination")),
                         stringValue(constraints.get("destination")), promptDestination);
+        if (isVagueDestination(destination)) destination = "";
         Integer promptDays = optionalIntMatch(prompt, DAYS);
         Integer promptTravelers = optionalIntMatch(prompt, TRAVELERS);
         int days = promptDays == null ? intValue(safe.get("days"), 3) : promptDays;
@@ -50,11 +53,15 @@ public class TravelConstraintExtractor {
                 : (structuredBudget != null ? structuredBudget : promptBudget);
         Long hotelMax = moneyToCents(constraints.get("hotelMaxNightly"));
 
+        List<String> specificAttractions = stringList(firstValue(
+                safe.get("specificAttractions"), constraints.get("specificAttractions")));
+        if (specificAttractions.isEmpty()) specificAttractions = namedAttractions(prompt);
         return new TravelConstraintSpec(
                 stringValue(safe.get("origin")), destination, dateValue(safe.get("startDate")), days, travelers,
                 budget, firstNonBlank(stringValue(constraints.get("currency")), "CNY"),
                 stringList(firstValue(safe.get("allowedTransportModes"), constraints.get("allowedTransportModes"))),
                 stringList(firstValue(safe.get("requiredAttractionTags"), constraints.get("requiredAttractionTags"))),
+                specificAttractions,
                 stringList(firstValue(safe.get("requiredCuisineTags"), constraints.get("requiredCuisineTags"))), hotelMax,
                 constraints, mapValue(constraints.get("softPreferences")),
                 intValue(safe.get("_supplementalVersion"), 0));
@@ -63,6 +70,24 @@ public class TravelConstraintExtractor {
     private static String match(String input, Pattern pattern) {
         Matcher matcher = pattern.matcher(input);
         return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private static List<String> namedAttractions(String input) {
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
+        Matcher matcher = NAMED_ATTRACTION.matcher(input == null ? "" : input);
+        while (matcher.find()) {
+            String value = matcher.group(1).replaceFirst("^(?:想?去|到|和|与|及|逛)", "").trim();
+            if (value.contains("的")) value = value.substring(value.lastIndexOf('的') + 1);
+            if (value.length() >= 2) values.add(value);
+        }
+        return List.copyOf(values);
+    }
+
+    private static boolean isVagueDestination(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.contains("好看的地方") || value.contains("哪里") || value.contains("哪儿")
+                || value.startsWith("海") && value.contains("好看")
+                || value.equals("海边") || value.equals("看海的地方") || value.equals("适合旅行的地方");
     }
 
     private static int intMatch(String input, Pattern pattern, int fallback) {

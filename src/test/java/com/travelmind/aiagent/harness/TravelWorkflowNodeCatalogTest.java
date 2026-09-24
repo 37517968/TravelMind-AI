@@ -33,7 +33,7 @@ class TravelWorkflowNodeCatalogTest {
         @SuppressWarnings("unchecked")
         java.util.List<String> missing = (java.util.List<String>) result.getData().get("missingFields");
         assertThat(missing)
-                .contains("destination", "maxBudget");
+                .containsExactly("destination");
     }
 
     @Test
@@ -74,6 +74,20 @@ class TravelWorkflowNodeCatalogTest {
         assertThat(spec.destination()).isEqualTo("上海");
         assertThat(spec.maxBudgetCents()).isEqualTo(200000L);
         assertThat(spec.days()).isEqualTo(3);
+    }
+
+    @Test
+    void vagueSeasideRequestShouldOfferDestinationRoutesInsteadOfAskingForACity() throws Exception {
+        TravelWorkflowNodeCatalog catalog = catalog();
+        WorkflowState state = new WorkflowState(33L, Map.of("prompt", "想去海比较好看的地方玩"));
+        NodeExecutionResult extraction = catalog.fixedNode(TravelPlanningGraphFactory.EXTRACT, state).execute(state);
+        state.merge(extraction.getData());
+
+        NodeExecutionResult check = catalog.fixedNode(TravelPlanningGraphFactory.CHECK, state).execute(state);
+
+        assertThat(check.getStatus()).isEqualTo("WAITING_USER");
+        assertThat(check.getData()).containsEntry("waitingReason", "DESTINATION_SELECTION");
+        assertThat((List<?>) check.getData().get("routeOptions")).hasSize(3);
     }
 
     @Test

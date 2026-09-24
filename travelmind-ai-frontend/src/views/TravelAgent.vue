@@ -14,6 +14,7 @@
           ai-type="travel"
           @send-message="sendMessage"
           @change-route-mode="changeRouteMode"
+          @select-route="selectRoute"
         />
       </div>
       
@@ -94,12 +95,13 @@ let waitingForUser = false
 let answerMessageIndex = -1
 
 // 添加消息到列表
-const addMessage = (content, isUser, type = '') => {
+const addMessage = (content, isUser, type = '', extra = {}) => {
   messages.value.push({
     content,
     isUser,
     type,
-    time: new Date().getTime()
+    time: new Date().getTime(),
+    ...extra
   })
 }
 
@@ -153,8 +155,13 @@ const readFinalResult = async () => {
     else addMessage(text, false, 'ai-final')
   }
   if (parsedResult?.mapPlan?.available) {
-    if (message) message.mapPlan = parsedResult.mapPlan
-    else if (messages.value.length) messages.value[messages.value.length - 1].mapPlan = parsedResult.mapPlan
+    if (message) {
+      message.mapPlan = parsedResult.mapPlan
+      message.planResult = parsedResult
+    } else if (messages.value.length) {
+      messages.value[messages.value.length - 1].mapPlan = parsedResult.mapPlan
+      messages.value[messages.value.length - 1].planResult = parsedResult
+    }
   }
   return parsedResult
 }
@@ -186,7 +193,9 @@ const subscribeTask = (taskId) => {
       if (status === 'WAITING_USER') {
         waitingForUser = true
         connectionStatus.value = 'waiting'
-        addMessage(event.message || '请补充完成规划所需的信息。', false, 'ai-question')
+        addMessage(event.message || '请补充完成规划所需的信息。', false, 'ai-question', {
+          routeOptions: Array.isArray(event?.details?.routeOptions) ? event.details.routeOptions : []
+        })
       } else if (status === 'FAILED') {
         addMessage(event.message || '任务执行失败，请稍后重试。', false, 'ai-error')
       } else if (status === 'RUNNING') {
@@ -252,6 +261,28 @@ const sendMessage = async (message) => {
     activeTaskId = null
     waitingForUser = false
     addMessage(error?.response?.data?.message || '任务提交失败，请稍后重试。', false, 'ai-error')
+  }
+}
+
+const selectRoute = async route => {
+  if (!activeTaskId || !waitingForUser || !route) return
+  addMessage(`我选择：${route.emoji || '🗺️'} ${route.title}`, true, 'user-question')
+  connectionStatus.value = 'connecting'
+  try {
+    await resumeAgentTask(activeTaskId, {
+      selectedRouteId: route.id,
+      ...(route.destination ? { destination: route.destination } : {}),
+      selectedAttractionIds: (route.attractions || []).map(item => item.id),
+      selectedAttractionNames: (route.attractions || []).map(item => item.name),
+      userClarification: `选择${route.title}：${(route.attractions || []).map(item => item.name).join('、')}`
+    })
+    waitingForUser = false
+    answerMessageIndex = -1
+    if (!eventSource) subscribeTask(activeTaskId)
+  } catch (error) {
+    connectionStatus.value = 'waiting'
+    waitingForUser = true
+    addMessage(error?.response?.data?.message || '路线选择提交失败，请重试。', false, 'ai-error')
   }
 }
 

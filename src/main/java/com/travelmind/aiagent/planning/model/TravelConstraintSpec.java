@@ -21,6 +21,7 @@ public record TravelConstraintSpec(
         String currency,
         List<String> allowedTransportModes,
         List<String> requiredAttractionTags,
+        List<String> specificAttractions,
         List<String> requiredCuisineTags,
         Long hotelMaxNightlyCents,
         Map<String, Object> hardConstraints,
@@ -35,9 +36,21 @@ public record TravelConstraintSpec(
         currency = normalize(currency).isEmpty() ? "CNY" : currency;
         allowedTransportModes = immutable(allowedTransportModes);
         requiredAttractionTags = immutable(requiredAttractionTags);
+        specificAttractions = immutable(specificAttractions);
         requiredCuisineTags = immutable(requiredCuisineTags);
         hardConstraints = ImmutableValues.map(hardConstraints);
         softPreferences = ImmutableValues.map(softPreferences);
+    }
+
+    /** 兼容已有调用方和旧检查点；升级前的结构没有 specificAttractions。 */
+    public TravelConstraintSpec(String origin, String destination, LocalDate startDate, int days, int travelers,
+                                Long maxBudgetCents, String currency, List<String> allowedTransportModes,
+                                List<String> requiredAttractionTags, List<String> requiredCuisineTags,
+                                Long hotelMaxNightlyCents, Map<String, Object> hardConstraints,
+                                Map<String, Object> softPreferences, int supplementalVersion) {
+        this(origin, destination, startDate, days, travelers, maxBudgetCents, currency, allowedTransportModes,
+                requiredAttractionTags, List.of(), requiredCuisineTags, hotelMaxNightlyCents,
+                hardConstraints, softPreferences, supplementalVersion);
     }
 
     @JsonIgnore
@@ -62,7 +75,8 @@ public record TravelConstraintSpec(
         int nextDays = intValue(supplemental.get("days"), days);
         int nextTravelers = intValue(supplemental.get("travelers"), travelers);
         return new TravelConstraintSpec(origin, nextDestination, startDate, nextDays, nextTravelers,
-                nextBudget, currency, allowedTransportModes, requiredAttractionTags, requiredCuisineTags,
+                nextBudget, currency, allowedTransportModes, requiredAttractionTags, specificAttractions,
+                requiredCuisineTags,
                 hotelMaxNightlyCents, hard, softPreferences, supplementalVersion + 1);
     }
 
