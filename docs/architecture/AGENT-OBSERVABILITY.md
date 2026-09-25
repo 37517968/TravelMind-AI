@@ -40,6 +40,15 @@ X-Conversation-Id: 浏览器当前 conversationId
 
 后端校验任务所属会话。前端从 `localStorage` 自动读取该值，不把会话凭据放入 URL。
 
+节点详情接口：
+
+```http
+GET /api/agent/tasks/{taskId}/run/nodes/{checkpointId}
+X-Conversation-Id: 浏览器当前 conversationId
+```
+
+点击 Run Explorer 中的节点会按需读取 `input_snapshot / output_snapshot / state_snapshot`，在侧边抽屉中展示 Input、Output、State 和关联 Tool。接口递归移除会话凭据、密码、API Key、Token、Cookie 等字段，并限制 JSON 深度、节点数、数组项和长文本；原始快照不会进入 Tempo。
+
 前端地址：
 
 ```text

@@ -40,7 +40,8 @@
         <div class="panel-title"><h2>实际编排路径</h2><p>按 checkpoint 顺序展示等待、恢复和节点重试</p></div>
         <div class="workflow-path">
           <template v-for="(node, index) in run.nodes" :key="node.checkpointId">
-            <article class="node-card" :class="statusClass(node.status)">
+            <article class="node-card" :class="statusClass(node.status)" role="button" tabindex="0"
+                     @click="openNode(node)" @keydown.enter="openNode(node)">
               <div class="node-head"><span>{{ nodeIcon(node.status) }}</span><div><b>{{ node.label }}</b><code>{{ node.nodeId }}</code></div></div>
               <dl>
                 <div><dt>状态</dt><dd>{{ node.status }}</dd></div>
@@ -54,6 +55,7 @@
               <p v-for="warning in node.warnings" :key="warning" class="warning">⚠ {{ warning }}</p>
               <p v-if="node.errorMessage" class="node-error">{{ node.errorType }}：{{ node.errorMessage }}</p>
               <small v-if="node.outputKeys?.length">输出：{{ node.outputKeys.join('、') }}</small>
+              <button class="node-detail-button" type="button" @click.stop="openNode(node)">查看输入 / 输出 / 状态</button>
             </article>
             <div v-if="index < run.nodes.length - 1" class="path-arrow"><span>{{ node.route || 'NEXT' }}</span>↓</div>
           </template>
@@ -70,13 +72,61 @@
           <tr v-if="!run.tools.length"><td colspan="7" class="empty">本次任务没有工具审计记录</td></tr></tbody></table></div>
       </section>
     </template>
+
+    <div v-if="detailOpen" class="drawer-backdrop" @click.self="closeNode">
+      <aside class="node-drawer" aria-label="节点详情">
+        <header class="drawer-header">
+          <div>
+            <small>Checkpoint #{{ selectedNode?.checkpointId }} · Attempt {{ selectedNode?.attempt }}</small>
+            <h2>{{ selectedNode?.label }}</h2>
+            <code>{{ selectedNode?.nodeId }}</code>
+          </div>
+          <button type="button" class="drawer-close" @click="closeNode">×</button>
+        </header>
+
+        <p v-if="detailLoading" class="empty">正在读取并脱敏节点快照…</p>
+        <p v-else-if="detailError" class="error drawer-error">{{ detailError }}</p>
+        <template v-else-if="nodeDetail">
+          <div class="detail-meta">
+            <span :class="statusClass(nodeDetail.status)">{{ nodeDetail.status }}</span>
+            <span>{{ duration(nodeDetail.durationMs) }}</span>
+            <span>{{ formatTime(nodeDetail.startedAt) }}</span>
+            <span v-if="nodeDetail.traceId">Trace {{ nodeDetail.traceId }}</span>
+          </div>
+
+          <nav class="detail-tabs" aria-label="节点快照类型">
+            <button v-for="tab in detailTabs" :key="tab.key" type="button"
+                    :class="{ active: detailTab === tab.key }" @click="detailTab = tab.key">
+              {{ tab.label }}
+            </button>
+          </nav>
+
+          <section class="snapshot-panel">
+            <div class="snapshot-toolbar">
+              <span>{{ activeTabLabel }}</span>
+              <button type="button" @click="copy(prettySnapshot)">复制 JSON</button>
+            </div>
+            <pre>{{ prettySnapshot }}</pre>
+          </section>
+
+          <section v-if="nodeDetail.tools?.length" class="related-tools">
+            <h3>关联工具调用</h3>
+            <div v-for="tool in nodeDetail.tools" :key="tool.id" class="related-tool">
+              <b>🔧 {{ tool.toolName }}</b>
+              <span :class="tool.success ? 'success' : 'failed'">{{ tool.success ? 'SUCCESS' : tool.errorCode }}</span>
+              <span>{{ duration(tool.durationMs) }}</span>
+            </div>
+          </section>
+        </template>
+      </aside>
+    </div>
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAgentRun } from '../api'
+import { getAgentRun, getAgentRunNode } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -84,6 +134,17 @@ const inputTaskId = ref(route.params.taskId || '')
 const run = ref(null)
 const loading = ref(false)
 const error = ref('')
+const detailOpen = ref(false)
+const detailLoading = ref(false)
+const detailError = ref('')
+const selectedNode = ref(null)
+const nodeDetail = ref(null)
+const detailTab = ref('input')
+const detailTabs = [
+  { key: 'input', label: '输入 Input' },
+  { key: 'output', label: '输出 Output' },
+  { key: 'state', label: '状态 State' }
+]
 
 const load = async taskId => {
   if (!taskId) return
@@ -108,6 +169,30 @@ const statusClass = value => String(value || '').toLowerCase().replace('_user', 
 const nodeIcon = status => ({ SUCCEEDED: '✓', SUCCESS: '✓', RUNNING: '◌', WAITING_USER: '⏸', FAILED: '×' }[status] || '·')
 const toolsFor = node => (run.value?.tools || []).filter(tool => node.nodeId.startsWith(tool.workflowNode) || tool.workflowNode.startsWith(node.nodeId.split('_v')[0]))
 const copy = value => navigator.clipboard?.writeText(value)
+const openNode = async node => {
+  if (!run.value?.task?.id || !node?.checkpointId) return
+  selectedNode.value = node
+  nodeDetail.value = null
+  detailError.value = ''
+  detailTab.value = 'input'
+  detailOpen.value = true
+  detailLoading.value = true
+  try {
+    const { data } = await getAgentRunNode(run.value.task.id, node.checkpointId)
+    const payload = data?.checkpointId ? data : data?.data
+    if (!payload?.checkpointId) throw new Error(data?.message || '节点详情返回格式异常')
+    nodeDetail.value = payload
+  } catch (failure) {
+    detailError.value = failure?.response?.data?.message || failure?.message || '节点详情查询失败'
+  } finally { detailLoading.value = false }
+}
+const closeNode = () => { detailOpen.value = false }
+const activeTabLabel = computed(() => detailTabs.find(tab => tab.key === detailTab.value)?.label || '')
+const prettySnapshot = computed(() => {
+  if (!nodeDetail.value) return ''
+  const value = nodeDetail.value[detailTab.value]
+  return JSON.stringify(value ?? null, null, 2)
+})
 const taskDuration = computed(() => {
   const task = run.value?.task
   if (!task?.createdAt) return '—'
@@ -118,5 +203,5 @@ onMounted(() => { if (inputTaskId.value) load(inputTaskId.value) })
 </script>
 
 <style scoped>
-.run-page{min-height:100vh;padding:28px;background:#f3f6fa;color:#203047}.topbar{display:flex;gap:24px;align-items:flex-start;max-width:1180px;margin:auto}.topbar a{color:#4769ad;text-decoration:none}.topbar h1{margin:0;font-size:28px}.topbar p,.panel-title p{margin:5px 0 0;color:#718096}.search{display:flex;gap:10px;max-width:560px;margin:24px auto}.search input{flex:1;padding:12px 16px;border:1px solid #cfd8e5;border-radius:12px;font-size:15px}.search button,.trace-row button{border:0;border-radius:10px;background:#426bd0;color:white;padding:10px 16px;cursor:pointer}.summary-grid,.panel{max-width:1180px;margin:0 auto 18px}.summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.summary-grid article,.panel{background:white;border:1px solid #dfe6ef;border-radius:16px;box-shadow:0 6px 20px rgba(31,47,70,.05)}.summary-grid article{padding:15px;display:flex;flex-direction:column;gap:7px}.summary-grid small{color:#718096}.summary-grid strong{font-size:15px;overflow-wrap:anywhere}.panel{padding:20px}.panel-title h2{margin:0;font-size:19px}.execution-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:16px}.execution-card{border:1px solid #e0e7f0;border-radius:12px;padding:13px}.execution-head{display:flex;justify-content:space-between;gap:8px}.execution-card small{display:block;color:#718096;margin-top:7px}.trace-row{display:flex;align-items:center;gap:8px;margin-top:10px}.trace-row code{overflow:hidden;text-overflow:ellipsis;font-size:11px}.trace-row button{padding:5px 8px;font-size:11px}.trace-row a{font-size:11px;color:#426bd0}.workflow-path{display:flex;flex-direction:column;max-width:820px;margin:18px auto 0}.node-card{border:1px solid #dbe4ef;border-left:5px solid #91a2b8;border-radius:13px;padding:14px;background:#fbfcfe}.node-card.succeeded,.node-card.success{border-left-color:#2f9e6f}.node-card.running{border-left-color:#4474db}.node-card.waiting{border-left-color:#dc9b24}.node-card.failed{border-left-color:#d34d58}.node-head{display:flex;gap:10px;align-items:center}.node-head>span{font-size:20px}.node-head div{display:flex;flex-direction:column}.node-head code{font-size:10px;color:#8290a4;margin-top:3px}.node-card dl{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0}.node-card dl div{display:flex;gap:5px}.node-card dt{color:#7a8799}.node-card dd{margin:0;font-weight:600}.node-tools{display:flex;flex-wrap:wrap;gap:7px}.node-tools span{font-size:11px;background:#eaf5ef;color:#267552;padding:4px 7px;border-radius:12px}.node-tools span.failed{background:#fdebec;color:#b63d48}.warning{color:#a86d13;font-size:12px}.node-error,.error{color:#bd3947}.path-arrow{display:flex;flex-direction:column;align-items:center;color:#718096;font-size:17px;padding:4px}.path-arrow span{font-size:10px;background:#edf1f7;padding:2px 7px;border-radius:8px}.table-wrap{overflow:auto;margin-top:15px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:9px;border-bottom:1px solid #e5eaf1;text-align:left;white-space:nowrap}th{background:#f5f8fc}.success{color:#24875e}.failed{color:#c33f4c}.waiting{color:#b47917}.running{color:#356bd4}.empty{text-align:center;color:#8793a4;padding:16px}@media(max-width:800px){.run-page{padding:15px}.summary-grid{grid-template-columns:repeat(2,1fr)}.topbar{gap:12px}.execution-list{grid-template-columns:1fr}}
+.run-page{min-height:100vh;padding:28px;background:#f3f6fa;color:#203047}.topbar{display:flex;gap:24px;align-items:flex-start;max-width:1180px;margin:auto}.topbar a{color:#4769ad;text-decoration:none}.topbar h1{margin:0;font-size:28px}.topbar p,.panel-title p{margin:5px 0 0;color:#718096}.search{display:flex;gap:10px;max-width:560px;margin:24px auto}.search input{flex:1;padding:12px 16px;border:1px solid #cfd8e5;border-radius:12px;font-size:15px}.search button,.trace-row button{border:0;border-radius:10px;background:#426bd0;color:white;padding:10px 16px;cursor:pointer}.summary-grid,.panel{max-width:1180px;margin:0 auto 18px}.summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.summary-grid article,.panel{background:white;border:1px solid #dfe6ef;border-radius:16px;box-shadow:0 6px 20px rgba(31,47,70,.05)}.summary-grid article{padding:15px;display:flex;flex-direction:column;gap:7px}.summary-grid small{color:#718096}.summary-grid strong{font-size:15px;overflow-wrap:anywhere}.panel{padding:20px}.panel-title h2{margin:0;font-size:19px}.execution-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:16px}.execution-card{border:1px solid #e0e7f0;border-radius:12px;padding:13px}.execution-head{display:flex;justify-content:space-between;gap:8px}.execution-card small{display:block;color:#718096;margin-top:7px}.trace-row{display:flex;align-items:center;gap:8px;margin-top:10px}.trace-row code{overflow:hidden;text-overflow:ellipsis;font-size:11px}.trace-row button{padding:5px 8px;font-size:11px}.trace-row a{font-size:11px;color:#426bd0}.workflow-path{display:flex;flex-direction:column;max-width:820px;margin:18px auto 0}.node-card{border:1px solid #dbe4ef;border-left:5px solid #91a2b8;border-radius:13px;padding:14px;background:#fbfcfe;cursor:pointer;transition:box-shadow .2s,transform .2s}.node-card:hover{box-shadow:0 7px 20px rgba(50,70,105,.12);transform:translateY(-1px)}.node-card.succeeded,.node-card.success{border-left-color:#2f9e6f}.node-card.running{border-left-color:#4474db}.node-card.waiting{border-left-color:#dc9b24}.node-card.failed{border-left-color:#d34d58}.node-head{display:flex;gap:10px;align-items:center}.node-head>span{font-size:20px}.node-head div{display:flex;flex-direction:column}.node-head code{font-size:10px;color:#8290a4;margin-top:3px}.node-card dl{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0}.node-card dl div{display:flex;gap:5px}.node-card dt{color:#7a8799}.node-card dd{margin:0;font-weight:600}.node-tools{display:flex;flex-wrap:wrap;gap:7px}.node-tools span{font-size:11px;background:#eaf5ef;color:#267552;padding:4px 7px;border-radius:12px}.node-tools span.failed{background:#fdebec;color:#b63d48}.node-detail-button{display:block;margin-top:12px;border:0;background:#e8eefc;color:#365faf;border-radius:9px;padding:7px 10px;cursor:pointer}.warning{color:#a86d13;font-size:12px}.node-error,.error{color:#bd3947}.path-arrow{display:flex;flex-direction:column;align-items:center;color:#718096;font-size:17px;padding:4px}.path-arrow span{font-size:10px;background:#edf1f7;padding:2px 7px;border-radius:8px}.table-wrap{overflow:auto;margin-top:15px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:9px;border-bottom:1px solid #e5eaf1;text-align:left;white-space:nowrap}th{background:#f5f8fc}.success{color:#24875e}.failed{color:#c33f4c}.waiting{color:#b47917}.running{color:#356bd4}.empty{text-align:center;color:#8793a4;padding:16px}.drawer-backdrop{position:fixed;inset:0;background:rgba(25,35,50,.42);z-index:1000;display:flex;justify-content:flex-end}.node-drawer{width:min(760px,92vw);height:100%;background:#f7f9fc;box-shadow:-12px 0 35px rgba(18,28,43,.2);padding:22px;overflow:auto}.drawer-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.drawer-header h2{margin:4px 0}.drawer-header small,.drawer-header code{color:#718096}.drawer-close{border:0;background:#e7ecf3;border-radius:50%;width:36px;height:36px;font-size:24px;cursor:pointer}.drawer-error{margin-top:24px}.detail-meta{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0}.detail-meta span{background:white;border:1px solid #dfe6ef;border-radius:12px;padding:7px 10px;font-size:12px}.detail-tabs{display:flex;gap:8px;border-bottom:1px solid #dce4ee}.detail-tabs button{border:0;background:transparent;padding:10px 13px;color:#66758a;cursor:pointer}.detail-tabs button.active{color:#315fc0;border-bottom:3px solid #426bd0;font-weight:700}.snapshot-panel{margin-top:14px;background:#152033;border-radius:13px;overflow:hidden;color:#d8e3f3}.snapshot-toolbar{display:flex;justify-content:space-between;align-items:center;padding:10px 13px;background:#202e45}.snapshot-toolbar button{border:1px solid #64758e;background:transparent;color:#d8e3f3;border-radius:7px;padding:5px 9px;cursor:pointer}.snapshot-panel pre{margin:0;padding:16px;max-height:58vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55}.related-tools{margin-top:18px}.related-tools h3{font-size:15px}.related-tool{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #dfe6ef;font-size:12px}.related-tool b{margin-right:auto}@media(max-width:800px){.run-page{padding:15px}.summary-grid{grid-template-columns:repeat(2,1fr)}.topbar{gap:12px}.execution-list{grid-template-columns:1fr}.node-drawer{width:100%;padding:16px}}
 </style>

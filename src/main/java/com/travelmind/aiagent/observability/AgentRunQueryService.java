@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmind.aiagent.harness.TravelPlanningGraphFactory;
 import com.travelmind.aiagent.common.ErrorCode;
 import com.travelmind.aiagent.exception.BusinessException;
+import com.travelmind.aiagent.observability.dto.AgentNodeDetailView;
 import com.travelmind.aiagent.observability.dto.AgentRunView;
 import com.travelmind.aiagent.task.mapper.AgentTaskExecutionMapper;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
@@ -32,17 +33,19 @@ public class AgentRunQueryService {
     private final AgentWorkflowCheckpointMapper checkpointMapper;
     private final ToolAuditLogMapper toolMapper;
     private final ObjectMapper objectMapper;
+    private final CheckpointSnapshotSanitizer snapshotSanitizer;
     private final String grafanaUrl;
 
     public AgentRunQueryService(AgentTaskMapper taskMapper, AgentTaskExecutionMapper executionMapper,
                                 AgentWorkflowCheckpointMapper checkpointMapper, ToolAuditLogMapper toolMapper,
-                                ObjectMapper objectMapper,
+                                ObjectMapper objectMapper, CheckpointSnapshotSanitizer snapshotSanitizer,
                                 @Value("${observability.grafana.public-url:http://localhost:3000}") String grafanaUrl) {
         this.taskMapper = taskMapper;
         this.executionMapper = executionMapper;
         this.checkpointMapper = checkpointMapper;
         this.toolMapper = toolMapper;
         this.objectMapper = objectMapper;
+        this.snapshotSanitizer = snapshotSanitizer;
         this.grafanaUrl = grafanaUrl;
     }
 
@@ -53,12 +56,16 @@ public class AgentRunQueryService {
     }
 
     public AgentRunView getForConversation(Long taskId, String conversationId) {
-        AgentTask task = taskMapper.selectById(taskId);
-        if (task == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "任务不存在");
-        if (!same(task.getConversationId(), conversationId)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看当前会话创建的任务链路");
-        }
+        AgentTask task = requireConversationTask(taskId, conversationId);
         return build(task);
+    }
+
+    public AgentNodeDetailView getNode(Long taskId, Long checkpointId) {
+        return nodeDetail(requireTask(taskId), requireCheckpoint(taskId, checkpointId));
+    }
+
+    public AgentNodeDetailView getNodeForConversation(Long taskId, Long checkpointId, String conversationId) {
+        return nodeDetail(requireConversationTask(taskId, conversationId), requireCheckpoint(taskId, checkpointId));
     }
 
     private AgentRunView build(AgentTask task) {
@@ -74,6 +81,53 @@ public class AgentRunQueryService {
     private boolean same(String expected, String actual) {
         if (expected == null || actual == null || expected.length() != actual.length()) return false;
         return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private AgentTask requireTask(Long taskId) {
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "任务不存在");
+        return task;
+    }
+
+    private AgentTask requireConversationTask(Long taskId, String conversationId) {
+        AgentTask task = requireTask(taskId);
+        if (!same(task.getConversationId(), conversationId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看当前会话创建的任务链路");
+        }
+        return task;
+    }
+
+    private AgentWorkflowCheckpoint requireCheckpoint(Long taskId, Long checkpointId) {
+        AgentWorkflowCheckpoint checkpoint = checkpointMapper.selectById(checkpointId);
+        if (checkpoint == null || !taskId.equals(checkpoint.getTaskId())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "节点检查点不存在");
+        }
+        return checkpoint;
+    }
+
+    private AgentNodeDetailView nodeDetail(AgentTask task, AgentWorkflowCheckpoint checkpoint) {
+        List<AgentTaskExecution> executions = executionMapper.selectByTaskId(task.getId());
+        AgentTaskExecution execution = executionFor(checkpoint.getStartedAt(), executions);
+        List<AgentRunView.ToolCallView> tools = toolMapper.selectByRequestId(String.valueOf(task.getId())).stream()
+                .filter(value -> related(checkpoint.getNodeId(), value.getWorkflowNode()))
+                .map(this::tool).toList();
+        return new AgentNodeDetailView(checkpoint.getId(), task.getId(),
+                execution == null ? null : execution.getId(),
+                execution == null ? null : execution.getTraceId(),
+                execution == null ? null : execution.getSpanId(),
+                checkpoint.getNodeId(), TravelPlanningGraphFactory.label(checkpoint.getNodeId()),
+                checkpoint.getNodeVersion(), checkpoint.getAttempt(), checkpoint.getNodeStatus(),
+                checkpoint.getDurationMs(), checkpoint.getStartedAt(), checkpoint.getFinishedAt(),
+                checkpoint.getErrorType(), checkpoint.getErrorMessage(),
+                snapshotSanitizer.sanitize(checkpoint.getInputSnapshot()),
+                snapshotSanitizer.sanitize(checkpoint.getOutputSnapshot()),
+                snapshotSanitizer.sanitize(checkpoint.getStateSnapshot()), tools);
+    }
+
+    private boolean related(String nodeId, String workflowNode) {
+        if (nodeId == null || workflowNode == null) return false;
+        String logicalNode = nodeId.split("_v")[0];
+        return nodeId.startsWith(workflowNode) || workflowNode.startsWith(logicalNode);
     }
 
     private AgentRunView.TaskSummary task(AgentTask value) {
@@ -107,12 +161,17 @@ public class AgentRunQueryService {
     }
 
     private Long executionAt(LocalDateTime startedAt, List<AgentTaskExecution> executions) {
+        AgentTaskExecution matched = executionFor(startedAt, executions);
+        return matched == null ? null : matched.getId();
+    }
+
+    private AgentTaskExecution executionFor(LocalDateTime startedAt, List<AgentTaskExecution> executions) {
         if (startedAt == null) return null;
         AgentTaskExecution matched = null;
         for (AgentTaskExecution execution : executions) {
             if (execution.getStartedAt() != null && !execution.getStartedAt().isAfter(startedAt)) matched = execution;
         }
-        return matched == null ? null : matched.getId();
+        return matched;
     }
 
     private ParsedOutput parseOutput(String json) {

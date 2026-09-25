@@ -2,6 +2,7 @@ package com.travelmind.aiagent.observability;
 
 import com.travelmind.aiagent.annotation.AuthCheck;
 import com.travelmind.aiagent.constant.UserConstant;
+import com.travelmind.aiagent.observability.dto.AgentNodeDetailView;
 import com.travelmind.aiagent.observability.dto.AgentRunView;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,5 +31,21 @@ public class AgentRunController {
             @PathVariable Long taskId,
             @RequestHeader("X-Conversation-Id") String conversationId) {
         return service.getForConversation(taskId, conversationId);
+    }
+
+    @GetMapping("/admin/agent/runs/{taskId}/nodes/{checkpointId}")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @Operation(summary = "管理员查看节点的脱敏输入、输出和状态快照")
+    public AgentNodeDetailView getNode(@PathVariable Long taskId, @PathVariable Long checkpointId) {
+        return service.getNode(taskId, checkpointId);
+    }
+
+    @GetMapping("/agent/tasks/{taskId}/run/nodes/{checkpointId}")
+    @Operation(summary = "当前会话查看自己任务节点的脱敏输入、输出和状态快照")
+    public AgentNodeDetailView getNodeForConversation(
+            @PathVariable Long taskId,
+            @PathVariable Long checkpointId,
+            @RequestHeader("X-Conversation-Id") String conversationId) {
+        return service.getNodeForConversation(taskId, checkpointId, conversationId);
     }
 }

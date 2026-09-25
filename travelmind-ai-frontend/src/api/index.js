@@ -30,6 +30,16 @@ export const getAgentRun = (taskId) => {
   return request.get(`/admin/agent/runs/${taskId}`)
 }
 
+export const getAgentRunNode = (taskId, checkpointId) => {
+  const conversationId = localStorage.getItem('travel-conversation-id')
+  if (conversationId) {
+    return request.get(`/agent/tasks/${taskId}/run/nodes/${checkpointId}`, {
+      headers: { 'X-Conversation-Id': conversationId }
+    })
+  }
+  return request.get(`/admin/agent/runs/${taskId}/nodes/${checkpointId}`)
+}
+
 export const resumeAgentTask = (taskId, supplemental) => request.post(`/agent/tasks/${taskId}/resume`, {
   supplemental
 })
@@ -125,6 +135,7 @@ export default {
   createAgentTask,
   getAgentTask,
   getAgentRun,
+  getAgentRunNode,
   resumeAgentTask,
   cancelAgentTask,
   clearAgentConversationMemory,
