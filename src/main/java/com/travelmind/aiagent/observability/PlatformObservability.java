@@ -2,6 +2,7 @@ package com.travelmind.aiagent.observability;
 
 import com.travelmind.aiagent.tool.model.ToolPolicy;
 import com.travelmind.aiagent.tool.model.ToolResult;
+import com.travelmind.aiagent.tool.model.ToolExecutionContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
+import java.time.Duration;
 
 /**
  * 平台业务指标和 Trace 入口。指标标签只使用有限枚举；taskId/requestId 仅作为 Trace 高基数字段。
@@ -70,6 +72,15 @@ public class PlatformObservability {
         return Observation.start("rag.hybrid.search", observations);
     }
 
+    public Observation startTool(ToolExecutionContext context, ToolPolicy policy) {
+        return Observation.createNotStarted("agent.tool.call", observations)
+                .lowCardinalityKeyValue("tool.name", finite(policy.toolName(), "unknown"))
+                .lowCardinalityKeyValue("tool.source", finite(policy.source(), "unknown"))
+                .lowCardinalityKeyValue("agent.node.id", finite(context.workflowNode(), "UNKNOWN"))
+                .highCardinalityKeyValue("agent.task.id", safe(context.requestId()))
+                .start();
+    }
+
     public void completeRag(Timer.Sample sample, boolean empty, boolean degraded, boolean cacheHit) {
         String outcome = empty ? "EMPTY" : "HIT";
         sample.stop(Timer.builder("rag.search.duration")
@@ -113,6 +124,32 @@ public class PlatformObservability {
     public void recordModelFirstToken(long elapsedNanos) {
         Timer.builder("agent.model.first.token.duration").register(meters)
                 .record(java.time.Duration.ofNanos(Math.max(0, elapsedNanos)));
+    }
+
+    public void recordModelUsage(String nodeId, int calls, int tokens) {
+        if (calls > 0) Counter.builder("agent.model.calls").tag("node", finite(nodeId, "UNKNOWN"))
+                .register(meters).increment(calls);
+        if (tokens > 0) Counter.builder("agent.model.tokens").tag("node", finite(nodeId, "UNKNOWN"))
+                .register(meters).increment(tokens);
+    }
+
+    public void recordWorkflowRoute(String nodeId, String route) {
+        Counter.builder("agent.workflow.route")
+                .tag("node", finite(nodeId, "UNKNOWN"))
+                .tag("route", finite(route, "UNKNOWN"))
+                .register(meters).increment();
+    }
+
+    public void recordQueueDelay(Duration duration, String commandType) {
+        Timer.builder("agent.task.queue.delay")
+                .tag("command", finite(commandType, "UNKNOWN"))
+                .register(meters).record(duration.isNegative() ? Duration.ZERO : duration);
+    }
+
+    public void recordEndToEnd(Duration duration, String outcome) {
+        Timer.builder("agent.task.end.to.end")
+                .tag("outcome", finite(outcome, "UNKNOWN"))
+                .register(meters).record(duration.isNegative() ? Duration.ZERO : duration);
     }
 
     private String finite(String value, String fallback) {

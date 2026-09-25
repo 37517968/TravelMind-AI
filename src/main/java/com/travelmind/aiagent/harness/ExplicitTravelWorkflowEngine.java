@@ -60,6 +60,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
                 if (TravelPlanningGraphFactory.INTENT.equals(logicalNodeId)) restartForNewPlan(taskId, state, result);
                 if (pauseIfNeeded(taskId, node, result, state)) waiting[0] = true;
                 String route = Objects.toString(result.getData().get("workflowRoute"), "CONTINUE");
+                observability.recordWorkflowRoute(logicalNodeId, route);
                 return Map.of("route", route, "lastNode", logicalNodeId);
             });
             Optional<OverAllState> graphState = graph.invoke(Map.of("taskId", taskId),
@@ -111,6 +112,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
         String outcome = "FAILED";
         try (Observation.Scope ignored = observation.openScope()) {
             NodeExecutionResult result = executeNodeInternal(initialTask, state, node);
+            observability.recordModelUsage(node.nodeId(), result.getModelCalls(), result.getEstimatedTokens());
             outcome = result.getStatus();
             return result;
         } catch (RuntimeException | Error failure) {

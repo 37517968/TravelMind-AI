@@ -258,9 +258,10 @@ const sendMessage = async (message) => {
   }
   addMessage(message, true, 'user-question')
   connectionStatus.value = 'connecting'
-  beginAssistantResponse()
+  const responseMessage = beginAssistantResponse()
   try {
     if (activeTaskId && waitingForUser) {
+      responseMessage.taskId = activeTaskId
       await resumeAgentTask(activeTaskId, { userClarification: message })
       waitingForUser = false
       if (!eventSource) subscribeTask(activeTaskId)
@@ -275,6 +276,7 @@ const sendMessage = async (message) => {
       constraints: {}
     })
     activeTaskId = data.taskId
+    responseMessage.taskId = activeTaskId
     subscribeTask(activeTaskId)
   } catch (error) {
     connectionStatus.value = 'error'
@@ -291,7 +293,8 @@ const selectRoute = async route => {
   if (!activeTaskId || !waitingForUser || !route) return
   addMessage(`我选择：${route.emoji || '🗺️'} ${route.title}`, true, 'user-question')
   connectionStatus.value = 'connecting'
-  beginAssistantResponse()
+  const responseMessage = beginAssistantResponse()
+  responseMessage.taskId = activeTaskId
   try {
     await resumeAgentTask(activeTaskId, {
       selectedRouteId: route.id,

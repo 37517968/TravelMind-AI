@@ -9,6 +9,7 @@ import com.travelmind.aiagent.tool.model.ToolResult;
 import com.travelmind.aiagent.observability.PlatformObservability;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import io.micrometer.observation.Observation;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -24,6 +25,10 @@ import java.util.stream.Collectors;
 public class ToolAuditService {
     private final ToolAuditLogMapper mapper;
     private final PlatformObservability observability;
+
+    public Observation startObservation(ToolExecutionContext context, ToolPolicy policy) {
+        return observability.startTool(context, policy);
+    }
 
     public void record(ToolExecutionContext context, ToolPolicy policy, String argumentsHash,
                        ToolResult result, int attempts, long durationMs) {

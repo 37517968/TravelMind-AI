@@ -13,6 +13,24 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 512
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      - name: keep-errors
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+      - name: keep-slow-traces
+        type: latency
+        latency: {threshold_ms: 5000}
+      - name: keep-agent-exceptional-outcomes
+        type: string_attribute
+        string_attribute:
+          key: agent.task.outcome
+          values: [FAILED, RETRY, DLQ, INFRASTRUCTURE_ERROR, WAITING_USER]
+      - name: sample-normal-traces
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
 
 exporters:
   otlp/tempo:
@@ -29,5 +47,5 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, tail_sampling, batch]
       exporters: [otlp/tempo]

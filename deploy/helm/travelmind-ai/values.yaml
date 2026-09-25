@@ -19,7 +19,9 @@ config:
   pgvectorJdbcUrl: jdbc:postgresql://pgvector-primary.database.svc.cluster.local:5432/travel_knowledge
   pgvectorUsername: travel
   otelEndpoint: http://otel-collector.observability.svc.cluster.local:4318/v1/traces
-  traceSamplingProbability: "0.10"
+  # Collector 使用 tail_sampling 时应用端必须先保留完整 Trace。
+  traceSamplingProbability: "1.0"
+  grafanaPublicUrl: https://grafana.example.com
   userMapToolQps: "20"
 
 api:

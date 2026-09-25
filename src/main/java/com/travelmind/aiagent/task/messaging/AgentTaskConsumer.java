@@ -6,6 +6,7 @@ import com.travelmind.aiagent.harness.HarnessException;
 import com.travelmind.aiagent.harness.WorkflowEngine;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
 import com.travelmind.aiagent.observability.PlatformObservability;
+import com.travelmind.aiagent.observability.AgentExecutionRecorder;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
 import static com.travelmind.aiagent.task.messaging.AgentMessagingConstants.*;
@@ -35,6 +38,7 @@ public class AgentTaskConsumer {
     private final AgentTaskMapper taskMapper;
     private final RabbitTemplate rabbitTemplate;
     private final PlatformObservability observability;
+    private final AgentExecutionRecorder executionRecorder;
 
     @Value("${agent.task.max-consumer-attempts:3}")
     private int maxAttempts;
@@ -47,13 +51,27 @@ public class AgentTaskConsumer {
         Timer.Sample sample = observability.startTimer();
         Observation observation = observability.startTask(command.taskId(), message.getMessageProperties().getMessageId());
         String outcome = "FAILED";
+        Throwable executionError = null;
+        AgentExecutionRecorder.Handle execution = null;
         try (Observation.Scope ignored = observation.openScope()) {
+        execution = executionRecorder.start(command.taskId(), command.commandType(),
+                message.getMessageProperties().getMessageId());
         try {
+            var queuedTask = taskMapper.selectById(command.taskId());
+            if (queuedTask != null && queuedTask.getUpdatedAt() != null) {
+                observability.recordQueueDelay(Duration.between(queuedTask.getUpdatedAt(), LocalDateTime.now()),
+                        command.commandType());
+            }
             workflowEngine.execute(command.taskId());
             var task = taskMapper.selectById(command.taskId());
             outcome = task == null ? "UNKNOWN" : task.getStatus();
+            if (task != null && task.getCreatedAt() != null &&
+                    java.util.Set.of("SUCCEEDED", "FAILED", "CANCELLED").contains(outcome)) {
+                observability.recordEndToEnd(Duration.between(task.getCreatedAt(), LocalDateTime.now()), outcome);
+            }
             channel.basicAck(deliveryTag, false);
         } catch (HarnessException failure) {
+            executionError = failure;
             observation.error(failure);
             if (failure.isRetryable() && attempt < maxAttempts) {
                 taskMapper.requeue(command.taskId());
@@ -69,6 +87,7 @@ public class AgentTaskConsumer {
                 log.error("Task {} moved to DLQ after {} attempts", command.taskId(), attempt + 1, failure);
             }
         } catch (Exception infrastructureFailure) {
+            executionError = infrastructureFailure;
             // 未能确定是否已安全持久化时不 ACK，让 RabbitMQ 重新投递。
             channel.basicNack(deliveryTag, false, true);
             outcome = "INFRASTRUCTURE_ERROR";
@@ -76,6 +95,7 @@ public class AgentTaskConsumer {
             throw infrastructureFailure;
         }
         } finally {
+            executionRecorder.finish(execution, outcome, executionError);
             observation.lowCardinalityKeyValue("agent.task.outcome", outcome);
             observation.stop();
             observability.completeTask(sample, outcome);
@@ -88,10 +108,17 @@ public class AgentTaskConsumer {
         properties.setContentType("application/json");
         properties.setMessageId(original.getMessageProperties().getMessageId());
         properties.setHeader("x-agent-attempt", attempt);
+        copyHeader(original, properties, "traceparent");
+        copyHeader(original, properties, "tracestate");
         properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
         rabbitTemplate.send("", queue, new Message(original.getBody(), properties), correlation);
         CorrelationData.Confirm confirm = correlation.getFuture().get(5, TimeUnit.SECONDS);
         if (!confirm.isAck()) throw new IllegalStateException("重试/DLQ 消息发布未确认: " + confirm.getReason());
+    }
+
+    private void copyHeader(Message original, MessageProperties target, String name) {
+        Object value = original.getMessageProperties().getHeaders().get(name);
+        if (value != null) target.setHeader(name, value);
     }
 
     private int headerAttempt(Message message) {

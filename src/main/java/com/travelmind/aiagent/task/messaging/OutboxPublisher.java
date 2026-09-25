@@ -2,6 +2,9 @@ package com.travelmind.aiagent.task.messaging;
 
 import com.travelmind.aiagent.task.mapper.OutboxEventMapper;
 import com.travelmind.aiagent.task.model.OutboxEvent;
+import com.travelmind.aiagent.observability.TraceContextCodec;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
@@ -20,6 +23,8 @@ import static com.travelmind.aiagent.task.messaging.AgentMessagingConstants.COMM
 public class OutboxPublisher {
     private final OutboxEventMapper outboxMapper;
     private final RabbitTemplate rabbitTemplate;
+    private final TraceContextCodec traceContextCodec;
+    private final Tracer tracer;
 
     @Value("${agent.task.outbox-batch-size:50}")
     private int batchSize;
@@ -27,6 +32,7 @@ public class OutboxPublisher {
     @Scheduled(fixedDelayString = "${agent.task.outbox-publish-delay-ms:1000}")
     public void publishPending() {
         for (OutboxEvent event : outboxMapper.selectPublishable(batchSize)) {
+            Span span = traceContextCodec.startProducerSpan(event.getTraceParent(), "agent.outbox.publish", event.getEventId());
             CorrelationData correlation = new CorrelationData(event.getEventId());
             correlation.getFuture().whenComplete((confirm, error) -> {
                 if (error == null && confirm != null && confirm.isAck()) {
@@ -36,7 +42,7 @@ public class OutboxPublisher {
                     outboxMapper.markFailed(event.getId(), truncate(reason));
                 }
             });
-            try {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
                 rabbitTemplate.convertAndSend(event.getExchangeName(), event.getRoutingKey(), event.getPayloadJson(), message -> {
                     message.getMessageProperties().setMessageId(event.getEventId());
                     message.getMessageProperties().setContentType("application/json");
@@ -44,8 +50,11 @@ public class OutboxPublisher {
                     return message;
                 }, correlation);
             } catch (RuntimeException ex) {
+                span.error(ex);
                 outboxMapper.markFailed(event.getId(), truncate(ex.getMessage()));
                 log.warn("Outbox event {} publish failed: {}", event.getEventId(), ex.getMessage());
+            } finally {
+                span.end();
             }
         }
     }

@@ -20,6 +20,8 @@ export const createAgentTask = (payload) => request.post('/agent/tasks', payload
 
 export const getAgentTask = (taskId) => request.get(`/agent/tasks/${taskId}`)
 
+export const getAgentRun = (taskId) => request.get(`/admin/agent/runs/${taskId}`)
+
 export const resumeAgentTask = (taskId, supplemental) => request.post(`/agent/tasks/${taskId}/resume`, {
   supplemental
 })
@@ -114,6 +116,7 @@ export const getFileDownloadUrl = (path) => {
 export default {
   createAgentTask,
   getAgentTask,
+  getAgentRun,
   resumeAgentTask,
   cancelAgentTask,
   clearAgentConversationMemory,

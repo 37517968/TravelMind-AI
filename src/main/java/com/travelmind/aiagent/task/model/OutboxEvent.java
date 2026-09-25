@@ -19,6 +19,7 @@ public class OutboxEvent {
     private String exchangeName;
     private String routingKey;
     private String payloadJson;
+    private String traceParent;
     private String status;
     private Integer retryCount;
     private LocalDateTime nextRetryAt;

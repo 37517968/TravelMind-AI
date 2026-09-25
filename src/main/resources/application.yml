@@ -133,6 +133,8 @@ management:
         agent.task.duration: true
         agent.node.duration: true
         agent.model.first.token.duration: true
+        agent.task.queue.delay: true
+        agent.task.end.to.end: true
         rag.search.duration: true
         tool.duration: true
   tracing:
@@ -286,3 +288,7 @@ travel:
     chunk:
       max-chars: 1200
       min-chars: 80
+
+observability:
+  grafana:
+    public-url: ${GRAFANA_PUBLIC_URL:http://localhost:3000}

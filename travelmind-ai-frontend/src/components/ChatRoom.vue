@@ -43,6 +43,9 @@
             <div v-if="msg.content" class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <TravelMapCard v-if="msg.mapPlan?.available" :map-plan="msg.mapPlan"
                            @change-mode="mode => emit('change-route-mode', mode)" />
+            <router-link v-if="msg.taskId" class="run-link" :to="`/observability/${msg.taskId}`">
+              🔎 查看本次 Agent 编排路径 · Task #{{ msg.taskId }}
+            </router-link>
             <span v-if="showTyping(index)" class="typing-indicator">▋</span>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
@@ -509,6 +512,16 @@ onMounted(() => {
   margin-top: 4px;
   text-align: right;
 }
+
+.run-link {
+  display: inline-flex;
+  margin-top: 9px;
+  color: #466ab3;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.run-link:hover { text-decoration: underline; }
 
 .chat-input-container {
   position: absolute;

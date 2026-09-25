@@ -11,6 +11,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import io.micrometer.observation.Observation;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -50,6 +51,24 @@ public class ToolGateway {
     }
 
     public ToolResult execute(ToolPolicy policy, String inputSchema, String arguments,
+                              ToolExecutionContext context, ToolInvocation invocation) {
+        Observation observation = audit.startObservation(context, policy);
+        try (Observation.Scope ignored = observation.openScope()) {
+            ToolResult result = executeObserved(policy, inputSchema, arguments, context, invocation);
+            observation.lowCardinalityKeyValue("tool.outcome", result.success() ? "SUCCESS" : "FAILED");
+            observation.lowCardinalityKeyValue("tool.cache_hit", Boolean.toString(result.cacheHit()));
+            observation.lowCardinalityKeyValue("tool.degraded", Boolean.toString(result.degraded()));
+            if (!result.success()) observation.event(Observation.Event.of("tool.error." + result.errorCode()));
+            return result;
+        } catch (RuntimeException failure) {
+            observation.error(failure);
+            throw failure;
+        } finally {
+            observation.stop();
+        }
+    }
+
+    private ToolResult executeObserved(ToolPolicy policy, String inputSchema, String arguments,
                               ToolExecutionContext context, ToolInvocation invocation) {
         long started = System.nanoTime();
         String argumentsHash = sha256(arguments == null ? "" : arguments);

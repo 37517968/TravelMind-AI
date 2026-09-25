@@ -44,7 +44,7 @@ class FlywayMigrationContainerTest {
             java.util.Set<String> names = new java.util.HashSet<>();
             while (tables.next()) names.add(tables.getString("TABLE_NAME"));
             assertThat(names).contains("agent_task", "agent_workflow_checkpoint", "outbox_event",
-                    "knowledge_index_state", "knowledge_chunk", "tool_audit_log", "mcp_tool_schema");
+                    "agent_task_execution", "knowledge_index_state", "knowledge_chunk", "tool_audit_log", "mcp_tool_schema");
         }
 
         try (Connection connection = MYSQL.createConnection("");

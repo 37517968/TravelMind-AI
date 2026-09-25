@@ -15,6 +15,7 @@ import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.model.AgentTaskStatus;
 import com.travelmind.aiagent.task.model.OutboxEvent;
 import com.travelmind.aiagent.observability.PlatformObservability;
+import com.travelmind.aiagent.observability.TraceContextCodec;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,7 @@ public class AgentTaskService {
     private final OutboxEventMapper outboxMapper;
     private final ObjectMapper objectMapper;
     private final PlatformObservability observability;
+    private final TraceContextCodec traceContextCodec;
     private final AgentConversationMemoryService conversationMemory;
     private final AgentPlanningDraftService planningDraftService;
 
@@ -229,6 +231,7 @@ public class AgentTaskService {
         event.setExchangeName(COMMAND_EXCHANGE);
         event.setRoutingKey(routingKey);
         event.setPayloadJson(writeJson(new AgentCommand(eventId, task.getId(), routingKey)));
+        event.setTraceParent(traceContextCodec.capture());
         event.setStatus("PENDING");
         event.setRetryCount(0);
         event.setNextRetryAt(LocalDateTime.now());

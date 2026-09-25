@@ -3,6 +3,8 @@ package com.travelmind.aiagent.tool.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmind.aiagent.governance.SentinelGovernanceService;
 import com.travelmind.aiagent.tool.model.*;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,8 @@ class ToolGatewayTest {
 
     @BeforeEach
     void passThroughSentinel() throws Exception {
+        when(audit.startObservation(any(), any())).thenAnswer(invocation ->
+                Observation.start("tool.test", ObservationRegistry.NOOP));
         when(sentinel.executeTool(anyString(), anyString(), anyString(), any())).thenAnswer(invocation ->
                 ((Callable<?>) invocation.getArgument(3)).call());
     }

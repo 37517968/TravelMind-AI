@@ -36,6 +36,15 @@ const routes = [
       title: '方案详情 - AI旅行管家',
       description: '查看旅行方案详情'
     }
+  },
+  {
+    path: '/observability/:taskId?',
+    name: 'AgentRun',
+    component: () => import('../views/AgentRun.vue'),
+    meta: {
+      title: 'Agent运行路径 - AI旅行管家',
+      description: '查看单次Agent任务的工作流节点、执行段、工具调用与Trace'
+    }
   }
 ]
 

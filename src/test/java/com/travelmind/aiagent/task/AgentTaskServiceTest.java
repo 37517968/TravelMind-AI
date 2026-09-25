@@ -12,6 +12,7 @@ import com.travelmind.aiagent.task.service.AgentTaskService;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
 import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
 import com.travelmind.aiagent.observability.PlatformObservability;
+import com.travelmind.aiagent.observability.TraceContextCodec;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -52,7 +53,7 @@ class AgentTaskServiceTest {
             return 1;
         }).when(taskMapper).insert(any(AgentTask.class));
         AgentTaskService service = new AgentTaskService(taskMapper, checkpointMapper, outboxMapper,
-                new ObjectMapper().findAndRegisterModules(), new PlatformObservability(), conversationMemory,
+                new ObjectMapper().findAndRegisterModules(), new PlatformObservability(), mock(TraceContextCodec.class), conversationMemory,
                 planningDraftService);
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setConversationId("conversation-1");
@@ -81,7 +82,7 @@ class AgentTaskServiceTest {
         when(taskMapper.selectByRequestId("same-key")).thenReturn(existing);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
 
         AgentTask result = service.submit("same-key", new AgentTaskCreateRequest());
 
@@ -105,7 +106,7 @@ class AgentTaskServiceTest {
         when(taskMapper.selectById(11L)).thenReturn(task);
         when(taskMapper.requeue(11L)).thenReturn(1);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
-                outboxMapper, new ObjectMapper(), new PlatformObservability(), memory,
+                outboxMapper, new ObjectMapper(), new PlatformObservability(), mock(TraceContextCodec.class), memory,
                 mock(AgentPlanningDraftService.class));
 
         service.resume(11L, Map.of("acceptedRelaxation", Map.of("budget", 4500)));
@@ -135,7 +136,7 @@ class AgentTaskServiceTest {
         }).when(taskMapper).insert(any(AgentTask.class));
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setUserId(7L);
         request.setConversationId("conversation-41");
@@ -161,7 +162,7 @@ class AgentTaskServiceTest {
         when(taskMapper.selectById(51L)).thenReturn(chat);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setConversationId("conversation-51");
         request.setTaskType(AgentTaskType.MODIFY);

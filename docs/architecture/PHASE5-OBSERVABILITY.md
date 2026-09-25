@@ -57,6 +57,9 @@ Compose 中的 Tempo 使用单进程、本地块存储，只适合开发验证�
 - Spring AI 的 Prompt、Completion、检索正文 Observation 默认关闭，避免泄露用户内容；
 - 生产默认 Trace 采样率为 10%，可通过 `OTEL_TRACES_SAMPLER_PROBABILITY` 调整。
 
+单次 Query 的 execution、Outbox Trace 传播、Run Explorer 和尾部采样见
+[`AGENT-OBSERVABILITY.md`](./AGENT-OBSERVABILITY.md)。启用 Collector 尾部采样后，应用端采样率必须设置为 `1.0`。
+
 ## 看板与告警
 
 预置看板分为性能、可靠性、质量、AI 用量/成本代理四组。告警覆盖 API 5xx、任务 P95/失败率、Outbox/RabbitMQ/DLQ、Tool 失败、RAG 降级、知识索引失败和 Redis 淘汰。Alertmanager 当前使用空接收器；上线前必须接入实际通知渠道，并将 runbook 链接替换为内部地址。

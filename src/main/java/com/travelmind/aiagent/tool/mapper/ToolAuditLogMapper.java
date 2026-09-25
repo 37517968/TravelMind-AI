@@ -3,6 +3,7 @@ package com.travelmind.aiagent.tool.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.travelmind.aiagent.tool.model.ToolAuditLog;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 import java.util.Map;
@@ -12,4 +13,7 @@ public interface ToolAuditLogMapper extends BaseMapper<ToolAuditLog> {
             "SUM(cache_hit) AS cacheHits, AVG(duration_ms) AS averageMs " +
             "FROM tool_audit_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) GROUP BY tool_name")
     List<Map<String, Object>> aggregateLast24Hours();
+
+    @Select("SELECT * FROM tool_audit_log WHERE request_id=#{requestId} ORDER BY id")
+    List<ToolAuditLog> selectByRequestId(@Param("requestId") String requestId);
 }

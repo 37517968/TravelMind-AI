@@ -22,7 +22,13 @@
     {"type":"row","title":"AI Usage & Cost Proxy / 用量与成本代理","gridPos":{"h":1,"w":24,"x":0,"y":24},"id":13},
     {"type":"stat","title":"Model Tokens (24h)","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(agent_model_tokens_24h)"}],"gridPos":{"h":6,"w":8,"x":0,"y":25},"id":14},
     {"type":"stat","title":"Model Calls (24h)","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max(agent_model_calls_24h)"}],"gridPos":{"h":6,"w":8,"x":8,"y":25},"id":15},
-    {"type":"timeseries","title":"Estimated Tool Cost Rate","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"currencyUSD"}},"targets":[{"expr":"sum by (tool) (rate(tool_estimated_cost_total[1h])) * 3600","legendFormat":"{{tool}} / hour"}],"gridPos":{"h":6,"w":8,"x":16,"y":25},"id":16}
+    {"type":"timeseries","title":"Estimated Tool Cost Rate","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"currencyUSD"}},"targets":[{"expr":"sum by (tool) (rate(tool_estimated_cost_total[1h])) * 3600","legendFormat":"{{tool}} / hour"}],"gridPos":{"h":6,"w":8,"x":16,"y":25},"id":16},
+
+    {"type":"row","title":"Agent Journey / 用户体验与编排","gridPos":{"h":1,"w":24,"x":0,"y":31},"id":18},
+    {"type":"timeseries","title":"Queue Delay P95","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, command) (rate(agent_task_queue_delay_seconds_bucket[10m])))","legendFormat":"{{command}}"}],"gridPos":{"h":7,"w":6,"x":0,"y":32},"id":19},
+    {"type":"timeseries","title":"End-to-End P95","datasource":{"type":"prometheus","uid":"prometheus"},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, outcome) (rate(agent_task_end_to_end_seconds_bucket[10m])))","legendFormat":"{{outcome}}"}],"gridPos":{"h":7,"w":6,"x":6,"y":32},"id":20},
+    {"type":"timeseries","title":"Workflow Routes","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (node, route) (rate(agent_workflow_route_total[10m]))","legendFormat":"{{node}} → {{route}}"}],"gridPos":{"h":7,"w":6,"x":12,"y":32},"id":21},
+    {"type":"timeseries","title":"Model Tokens Rate","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (node) (rate(agent_model_tokens_total[10m]))","legendFormat":"{{node}}"}],"gridPos":{"h":7,"w":6,"x":18,"y":32},"id":22}
   ],
   "refresh": "30s",
   "schemaVersion": 39,
