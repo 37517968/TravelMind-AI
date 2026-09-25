@@ -91,11 +91,14 @@ const load = async taskId => {
   error.value = ''
   try {
     const { data } = await getAgentRun(taskId)
-    run.value = data
+    const payload = data?.task ? data : data?.data
+    if (!payload?.task) throw new Error(data?.message || '运行链路返回格式异常')
+    run.value = payload
     if (String(route.params.taskId || '') !== String(taskId)) router.replace(`/observability/${taskId}`)
   } catch (failure) {
     run.value = null
-    error.value = failure?.response?.data?.message || failure?.response?.data?.error || '查询失败，请确认 taskId 和服务状态。'
+    error.value = failure?.response?.data?.message || failure?.response?.data?.error || failure?.message
+      || '查询失败，请确认 taskId 和服务状态。'
   } finally { loading.value = false }
 }
 

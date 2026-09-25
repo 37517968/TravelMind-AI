@@ -20,7 +20,15 @@ export const createAgentTask = (payload) => request.post('/agent/tasks', payload
 
 export const getAgentTask = (taskId) => request.get(`/agent/tasks/${taskId}`)
 
-export const getAgentRun = (taskId) => request.get(`/admin/agent/runs/${taskId}`)
+export const getAgentRun = (taskId) => {
+  const conversationId = localStorage.getItem('travel-conversation-id')
+  if (conversationId) {
+    return request.get(`/agent/tasks/${taskId}/run`, {
+      headers: { 'X-Conversation-Id': conversationId }
+    })
+  }
+  return request.get(`/admin/agent/runs/${taskId}`)
+}
 
 export const resumeAgentTask = (taskId, supplemental) => request.post(`/agent/tasks/${taskId}/resume`, {
   supplemental

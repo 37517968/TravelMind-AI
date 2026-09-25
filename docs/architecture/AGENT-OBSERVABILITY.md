@@ -31,6 +31,15 @@ GET /api/admin/agent/runs/{taskId}
 
 需要登录的 `admin` 用户。接口返回脱敏任务摘要、execution/traceId、checkpoint 节点、路由和 Tool 调用；不会返回 Prompt、Completion、工具参数、密钥、`input_snapshot` 或完整 `state_snapshot`。
 
+普通用户从同一浏览器会话查看自己创建的任务时使用：
+
+```http
+GET /api/agent/tasks/{taskId}/run
+X-Conversation-Id: 浏览器当前 conversationId
+```
+
+后端校验任务所属会话。前端从 `localStorage` 自动读取该值，不把会话凭据放入 URL。
+
 前端地址：
 
 ```text

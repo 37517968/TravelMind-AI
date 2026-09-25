@@ -3,6 +3,8 @@ package com.travelmind.aiagent.observability;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmind.aiagent.harness.TravelPlanningGraphFactory;
+import com.travelmind.aiagent.common.ErrorCode;
+import com.travelmind.aiagent.exception.BusinessException;
 import com.travelmind.aiagent.observability.dto.AgentRunView;
 import com.travelmind.aiagent.task.mapper.AgentTaskExecutionMapper;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
@@ -16,6 +18,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,12 +49,31 @@ public class AgentRunQueryService {
     public AgentRunView get(Long taskId) {
         AgentTask task = taskMapper.selectById(taskId);
         if (task == null) throw new IllegalArgumentException("任务不存在: " + taskId);
+        return build(task);
+    }
+
+    public AgentRunView getForConversation(Long taskId, String conversationId) {
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "任务不存在");
+        if (!same(task.getConversationId(), conversationId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看当前会话创建的任务链路");
+        }
+        return build(task);
+    }
+
+    private AgentRunView build(AgentTask task) {
+        Long taskId = task.getId();
         List<AgentTaskExecution> executions = executionMapper.selectByTaskId(taskId);
         List<AgentWorkflowCheckpoint> checkpoints = checkpointMapper.selectByTaskId(taskId);
         List<ToolAuditLog> tools = toolMapper.selectByRequestId(String.valueOf(taskId));
         return new AgentRunView(task(task), executions.stream().map(this::execution).toList(),
                 checkpoints.stream().map(value -> node(value, executions)).toList(),
                 tools.stream().map(this::tool).toList(), graph(), grafanaUrl);
+    }
+
+    private boolean same(String expected, String actual) {
+        if (expected == null || actual == null || expected.length() != actual.length()) return false;
+        return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
     }
 
     private AgentRunView.TaskSummary task(AgentTask value) {
