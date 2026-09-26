@@ -11,12 +11,15 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.servlet.http.HttpServletRequest;
+import com.travelmind.aiagent.service.UserService;
 
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "Agent运行可观测")
 public class AgentRunController {
     private final AgentRunQueryService service;
+    private final UserService userService;
 
     @GetMapping("/admin/agent/runs/{taskId}")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -29,8 +32,8 @@ public class AgentRunController {
     @Operation(summary = "当前会话按 taskId 查看自己的脱敏执行链路")
     public AgentRunView getForConversation(
             @PathVariable Long taskId,
-            @RequestHeader("X-Conversation-Id") String conversationId) {
-        return service.getForConversation(taskId, conversationId);
+            HttpServletRequest request) {
+        return service.getForUser(taskId, userService.getLoginUser(request).getId());
     }
 
     @GetMapping("/admin/agent/runs/{taskId}/nodes/{checkpointId}")
@@ -45,7 +48,7 @@ public class AgentRunController {
     public AgentNodeDetailView getNodeForConversation(
             @PathVariable Long taskId,
             @PathVariable Long checkpointId,
-            @RequestHeader("X-Conversation-Id") String conversationId) {
-        return service.getNodeForConversation(taskId, checkpointId, conversationId);
+            HttpServletRequest request) {
+        return service.getNodeForUser(taskId, checkpointId, userService.getLoginUser(request).getId());
     }
 }

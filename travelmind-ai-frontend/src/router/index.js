@@ -1,6 +1,25 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ensureAuth } from '../auth'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/AuthView.vue'),
+    meta: {
+      guestOnly: true,
+      title: '登录 - TravelMind AI'
+    }
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: () => import('../views/AuthView.vue'),
+    meta: {
+      guestOnly: true,
+      title: '注册 - TravelMind AI'
+    }
+  },
   {
     path: '/',
     name: 'Home',
@@ -15,9 +34,16 @@ const routes = [
     name: 'TravelAgent',
     component: () => import('../views/TravelAgent.vue'),
     meta: {
+      requiresAuth: true,
       title: 'AI旅行管家 - 智能旅游规划助手',
       description: 'AI旅行管家是您的智能旅游规划助手，提供目的地推荐、天气查询、行程规划、酒店餐厅推荐等全方位旅游服务'
     }
+  },
+  {
+    path: '/preferences',
+    name: 'Preferences',
+    component: () => import('../views/PreferencesView.vue'),
+    meta: { requiresAuth: true, title: '旅行偏好 - TravelMind AI' }
   },
   {
     path: '/community',
@@ -54,10 +80,19 @@ const router = createRouter({
 })
 
 // 全局导航守卫，设置文档标题
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   // 设置页面标题
   if (to.meta.title) {
     document.title = to.meta.title
+  }
+  const user = await ensureAuth()
+  if (to.meta.requiresAuth && !user) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+    return
+  }
+  if (to.meta.guestOnly && user) {
+    next('/')
+    return
   }
   next()
 })

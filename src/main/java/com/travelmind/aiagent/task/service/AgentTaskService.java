@@ -47,15 +47,20 @@ public class AgentTaskService {
     private final TraceContextCodec traceContextCodec;
     private final AgentConversationMemoryService conversationMemory;
     private final AgentPlanningDraftService planningDraftService;
+    private final AgentConversationService conversationService;
+    private final UserTravelPreferenceService preferenceService;
 
     @Transactional
-    public AgentTask submit(String requestId, AgentTaskCreateRequest request) {
+    public AgentTask submit(String requestId, Long authenticatedUserId, AgentTaskCreateRequest request) {
+        conversationService.requireOwned(authenticatedUserId, request.getConversationId());
         AgentTask existing = taskMapper.selectByRequestId(requestId);
         if (existing != null) {
+            requireOwner(existing, authenticatedUserId);
             observability.taskSubmitted("IDEMPOTENT_HIT");
             return existing;
         }
         try {
+            request.setUserId(authenticatedUserId);
             AgentTask baseTask = resolveBaseTask(request);
             AgentTask task = new AgentTask();
             task.setRequestId(requestId);
@@ -70,9 +75,10 @@ public class AgentTaskService {
                 requestJson.put("baseTaskId", baseTask.getId());
                 requestJson.set("basePlanSnapshot", readJson(baseTask.getResultJson()));
             }
-            requestJson.set("conversationHistory",
-                    objectMapper.valueToTree(conversationMemory.snapshot(request.getConversationId())));
-            Map<String, Object> planningDraft = planningDraftService.load(request.getConversationId());
+            requestJson.set("conversationHistory", objectMapper.valueToTree(
+                    conversationMemory.snapshot(authenticatedUserId, request.getConversationId())));
+            requestJson.set("userPreferences", objectMapper.valueToTree(preferenceService.get(authenticatedUserId)));
+            Map<String, Object> planningDraft = planningDraftService.load(authenticatedUserId, request.getConversationId());
             if (!planningDraft.isEmpty()) {
                 requestJson.set("planningDraft", objectMapper.valueToTree(planningDraft));
             }
@@ -84,17 +90,20 @@ public class AgentTaskService {
             task.setVersion(0);
             taskMapper.insert(task);
             appendCommand(task, request.getTaskType().name().equals("MODIFY") ? PLAN_MODIFY : PLAN_CREATE);
-            conversationMemory.appendUser(request.getConversationId(), request.getPrompt());
+            conversationMemory.appendUser(authenticatedUserId, request.getConversationId(), request.getPrompt());
+            conversationService.touch(authenticatedUserId, request.getConversationId(), request.getPrompt());
             observability.taskSubmitted("CREATED");
             return task;
         } catch (DuplicateKeyException race) {
             observability.taskSubmitted("IDEMPOTENT_RACE");
-            return taskMapper.selectByRequestId(requestId);
+            AgentTask raced = taskMapper.selectByRequestId(requestId);
+            requireOwner(raced, authenticatedUserId);
+            return raced;
         }
     }
 
-    public AgentTaskView get(Long taskId) {
-        AgentTask task = requireTask(taskId);
+    public AgentTaskView get(Long taskId, Long userId) {
+        AgentTask task = requireOwnedTask(taskId, userId);
         return AgentTaskView.builder()
                 .task(task)
                 .checkpoints(checkpointMapper.selectByTaskId(taskId))
@@ -102,22 +111,22 @@ public class AgentTaskService {
     }
 
     @Transactional
-    public AgentTask cancel(Long taskId) {
-        requireTask(taskId);
+    public AgentTask cancel(Long taskId, Long userId) {
+        requireOwnedTask(taskId, userId);
         taskMapper.requestCancellation(taskId);
-        return requireTask(taskId);
+        return requireOwnedTask(taskId, userId);
     }
 
     @Transactional
-    public AgentTask pause(Long taskId) {
-        requireTask(taskId);
+    public AgentTask pause(Long taskId, Long userId) {
+        requireOwnedTask(taskId, userId);
         taskMapper.markPaused(taskId);
-        return requireTask(taskId);
+        return requireOwnedTask(taskId, userId);
     }
 
     @Transactional
-    public AgentTask resume(Long taskId, Map<String, Object> supplemental) {
-        AgentTask task = requireTask(taskId);
+    public AgentTask resume(Long taskId, Long userId, Map<String, Object> supplemental) {
+        AgentTask task = requireOwnedTask(taskId, userId);
         if (!AgentTaskStatus.WAITING_USER.name().equals(task.getStatus()) &&
                 !AgentTaskStatus.FAILED.name().equals(task.getStatus())) {
             throw new IllegalStateException("只有 WAITING_USER 或 FAILED 任务可以恢复");
@@ -128,14 +137,14 @@ public class AgentTaskService {
             throw new IllegalStateException("任务状态已变化，请刷新后重试");
         }
         appendCommand(task, TASK_RESUME);
-        conversationMemory.appendUser(task.getConversationId(), Objects.toString(
+        conversationMemory.appendUser(userId, task.getConversationId(), Objects.toString(
                 supplemental.getOrDefault("userClarification", supplemental), ""));
-        return requireTask(taskId);
+        return requireOwnedTask(taskId, userId);
     }
 
     @Transactional
-    public AgentTask retryNode(Long taskId, String nodeId) {
-        AgentTask task = requireTask(taskId);
+    public AgentTask retryNode(Long taskId, Long userId, String nodeId) {
+        AgentTask task = requireOwnedTask(taskId, userId);
         var latest = checkpointMapper.selectLatest(taskId, nodeId);
         if (latest == null || !("FAILED".equals(latest.getNodeStatus()) || "WAITING_USER".equals(latest.getNodeStatus()))) {
             throw new IllegalArgumentException("节点没有可重试的执行记录: " + nodeId);
@@ -144,7 +153,7 @@ public class AgentTaskService {
             throw new IllegalStateException("只有失败或等待用户的任务可以重试");
         }
         appendCommand(task, TASK_RESUME);
-        return requireTask(taskId);
+        return requireOwnedTask(taskId, userId);
     }
 
     public AgentTask requireTask(Long id) {
@@ -153,9 +162,22 @@ public class AgentTaskService {
         return task;
     }
 
+    public AgentTask requireOwnedTask(Long id, Long userId) {
+        AgentTask task = requireTask(id);
+        requireOwner(task, userId);
+        return task;
+    }
+
+    private void requireOwner(AgentTask task, Long userId) {
+        if (task == null || userId == null || !Objects.equals(task.getUserId(), userId)) {
+            throw new com.travelmind.aiagent.exception.BusinessException(
+                    com.travelmind.aiagent.common.ErrorCode.NO_AUTH_ERROR, "只能操作当前用户自己的任务");
+        }
+    }
+
     private AgentTask resolveBaseTask(AgentTaskCreateRequest request) {
         AgentTask base = request.getBaseTaskId() == null
-                ? taskMapper.selectLatestSucceededPlan(request.getConversationId())
+                ? taskMapper.selectLatestSucceededPlan(request.getUserId(), request.getConversationId())
                 : taskMapper.selectById(request.getBaseTaskId());
         if (base == null) {
             if (request.getBaseTaskId() != null || request.getTaskType() == com.travelmind.aiagent.task.model.AgentTaskType.MODIFY)
@@ -163,8 +185,7 @@ public class AgentTaskService {
             return null;
         }
         boolean sameConversation = Objects.equals(base.getConversationId(), request.getConversationId());
-        boolean sameUser = request.getUserId() == null || base.getUserId() == null
-                || Objects.equals(base.getUserId(), request.getUserId());
+        boolean sameUser = Objects.equals(base.getUserId(), request.getUserId());
         boolean usable = AgentTaskStatus.SUCCEEDED.name().equals(base.getStatus())
                 && ("PLAN".equals(base.getTaskType()) || "MODIFY".equals(base.getTaskType()))
                 && isPlanningResult(base.getResultJson());

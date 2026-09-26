@@ -37,6 +37,7 @@ class AgentRunQueryServiceTest {
     void setUp() {
         task = new AgentTask();
         task.setId(35L);
+        task.setUserId(7L);
         task.setConversationId("conversation-35");
         checkpoint = new AgentWorkflowCheckpoint();
         checkpoint.setId(101L);
@@ -57,7 +58,7 @@ class AgentRunQueryServiceTest {
 
     @Test
     void shouldReturnSanitizedCheckpointForOwningConversation() {
-        AgentNodeDetailView detail = service.getNodeForConversation(35L, 101L, "conversation-35");
+        AgentNodeDetailView detail = service.getNodeForUser(35L, 101L, 7L);
 
         assertThat(detail.input().path("prompt").asText()).isEqualTo("杭州三日游");
         assertThat(detail.input().path("conversationId").asText()).isEqualTo("[REDACTED]");
@@ -66,12 +67,12 @@ class AgentRunQueryServiceTest {
     }
 
     @Test
-    void shouldRejectAnotherConversationAndCrossTaskCheckpoint() {
-        assertThatThrownBy(() -> service.getNodeForConversation(35L, 101L, "conversation-other"))
-                .isInstanceOf(BusinessException.class).hasMessageContaining("当前会话");
+    void shouldRejectAnotherUserAndCrossTaskCheckpoint() {
+        assertThatThrownBy(() -> service.getNodeForUser(35L, 101L, 8L))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("当前用户");
 
         checkpoint.setTaskId(99L);
-        assertThatThrownBy(() -> service.getNodeForConversation(35L, 101L, "conversation-35"))
+        assertThatThrownBy(() -> service.getNodeForUser(35L, 101L, 7L))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("检查点不存在");
     }
 }

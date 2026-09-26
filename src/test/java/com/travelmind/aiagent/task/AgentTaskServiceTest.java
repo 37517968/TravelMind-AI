@@ -11,6 +11,8 @@ import com.travelmind.aiagent.task.model.AgentTaskType;
 import com.travelmind.aiagent.task.service.AgentTaskService;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
 import com.travelmind.aiagent.task.service.AgentPlanningDraftService;
+import com.travelmind.aiagent.task.service.AgentConversationService;
+import com.travelmind.aiagent.task.service.UserTravelPreferenceService;
 import com.travelmind.aiagent.observability.PlatformObservability;
 import com.travelmind.aiagent.observability.TraceContextCodec;
 import org.junit.jupiter.api.Test;
@@ -42,9 +44,9 @@ class AgentTaskServiceTest {
         OutboxEventMapper outboxMapper = mock(OutboxEventMapper.class);
         AgentConversationMemoryService conversationMemory = mock(AgentConversationMemoryService.class);
         AgentPlanningDraftService planningDraftService = mock(AgentPlanningDraftService.class);
-        when(conversationMemory.snapshot("conversation-1")).thenReturn(List.of(
+        when(conversationMemory.snapshot(7L, "conversation-1")).thenReturn(List.of(
                 Map.of("role", "USER", "content", "上一次讨论了亲子出行")));
-        when(planningDraftService.load("conversation-1")).thenReturn(Map.of(
+        when(planningDraftService.load(7L, "conversation-1")).thenReturn(Map.of(
                 "constraintSpec", Map.of("destination", "上海", "maxBudgetCents", 200000L),
                 "status", "READY"));
         doAnswer(invocation -> {
@@ -54,14 +56,14 @@ class AgentTaskServiceTest {
         }).when(taskMapper).insert(any(AgentTask.class));
         AgentTaskService service = new AgentTaskService(taskMapper, checkpointMapper, outboxMapper,
                 new ObjectMapper().findAndRegisterModules(), new PlatformObservability(), mock(TraceContextCodec.class), conversationMemory,
-                planningDraftService);
+                planningDraftService, mock(AgentConversationService.class), mock(UserTravelPreferenceService.class));
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setConversationId("conversation-1");
         request.setPrompt("上海三日游");
         request.setDestination("上海");
         request.setStartDate(LocalDate.of(2026, 10, 1));
 
-        AgentTask task = service.submit("request-1", request);
+        AgentTask task = service.submit("request-1", 7L, request);
 
         assertThat(task.getId()).isEqualTo(88L);
         assertThat(task.getStatus()).isEqualTo("QUEUED");
@@ -69,7 +71,7 @@ class AgentTaskServiceTest {
                 "planningDraft", "上海");
         ArgumentCaptor<OutboxEvent> event = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outboxMapper).insert(event.capture());
-        verify(conversationMemory).appendUser("conversation-1", "上海三日游");
+        verify(conversationMemory).appendUser(7L, "conversation-1", "上海三日游");
         assertThat(event.getValue().getAggregateId()).isEqualTo("88");
         assertThat(event.getValue().getPayloadJson()).contains("taskId\":88");
     }
@@ -79,12 +81,16 @@ class AgentTaskServiceTest {
         AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);
         AgentTask existing = new AgentTask();
         existing.setId(9L);
+        existing.setUserId(7L);
         when(taskMapper.selectByRequestId("same-key")).thenReturn(existing);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class),
+                mock(AgentConversationService.class), mock(UserTravelPreferenceService.class));
 
-        AgentTask result = service.submit("same-key", new AgentTaskCreateRequest());
+        AgentTaskCreateRequest idempotent = new AgentTaskCreateRequest();
+        idempotent.setConversationId("conversation-9");
+        AgentTask result = service.submit("same-key", 7L, idempotent);
 
         assertThat(result).isSameAs(existing);
         verify(taskMapper, never()).insert(any());
@@ -97,6 +103,7 @@ class AgentTaskServiceTest {
         AgentConversationMemoryService memory = mock(AgentConversationMemoryService.class);
         AgentTask task = new AgentTask();
         task.setId(11L);
+        task.setUserId(7L);
         task.setStatus("WAITING_USER");
         task.setConversationId("conversation-11");
         task.setModelCallsUsed(2);
@@ -107,9 +114,10 @@ class AgentTaskServiceTest {
         when(taskMapper.requeue(11L)).thenReturn(1);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 outboxMapper, new ObjectMapper(), new PlatformObservability(), mock(TraceContextCodec.class), memory,
-                mock(AgentPlanningDraftService.class));
+                mock(AgentPlanningDraftService.class), mock(AgentConversationService.class),
+                mock(UserTravelPreferenceService.class));
 
-        service.resume(11L, Map.of("acceptedRelaxation", Map.of("budget", 4500)));
+        service.resume(11L, 7L, Map.of("acceptedRelaxation", Map.of("budget", 4500)));
 
         assertThat(task.getRequestJson()).contains("\"budget\":4500", "\"_supplementalVersion\":1");
         assertThat(task.getModelCallsUsed()).isEqualTo(2);
@@ -136,7 +144,8 @@ class AgentTaskServiceTest {
         }).when(taskMapper).insert(any(AgentTask.class));
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class),
+                mock(AgentConversationService.class), mock(UserTravelPreferenceService.class));
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setUserId(7L);
         request.setConversationId("conversation-41");
@@ -144,7 +153,7 @@ class AgentTaskServiceTest {
         request.setBaseTaskId(41L);
         request.setPrompt("把第二天的故宫改成长城");
 
-        AgentTask created = service.submit("modify-41", request);
+        AgentTask created = service.submit("modify-41", 7L, request);
 
         assertThat(created.getRequestJson()).contains("\"baseTaskId\":41", "basePlanSnapshot", "旧行程");
         verify(taskMapper).selectById(41L);
@@ -155,6 +164,7 @@ class AgentTaskServiceTest {
         AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);
         AgentTask chat = new AgentTask();
         chat.setId(51L);
+        chat.setUserId(7L);
         chat.setConversationId("conversation-51");
         chat.setTaskType("PLAN");
         chat.setStatus("SUCCEEDED");
@@ -162,14 +172,15 @@ class AgentTaskServiceTest {
         when(taskMapper.selectById(51L)).thenReturn(chat);
         AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
                 mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
-                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class));
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class), mock(AgentPlanningDraftService.class),
+                mock(AgentConversationService.class), mock(UserTravelPreferenceService.class));
         AgentTaskCreateRequest request = new AgentTaskCreateRequest();
         request.setConversationId("conversation-51");
         request.setTaskType(AgentTaskType.MODIFY);
         request.setBaseTaskId(51L);
         request.setPrompt("修改上一版行程");
 
-        assertThatThrownBy(() -> service.submit("modify-chat", request))
+        assertThatThrownBy(() -> service.submit("modify-chat", 7L, request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("基线计划不存在");
     }

@@ -17,6 +17,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import jakarta.servlet.http.HttpServletRequest;
+import com.travelmind.aiagent.service.UserService;
 
 @RestController
 @RequestMapping("/agent/tasks")
@@ -28,14 +30,16 @@ public class AgentTaskEventController {
     private final AgentProgressEventStore eventStore;
     private final AgentTaskService taskService;
     private final ExecutorService agentNodeInvocationExecutor;
+    private final UserService userService;
 
     @Value("${agent.task.sse-timeout-ms:180000}")
     private long timeoutMs;
 
     @GetMapping(value = "/{taskId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter events(@PathVariable Long taskId,
-                             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
-        taskService.requireTask(taskId);
+                             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
+                             HttpServletRequest request) {
+        taskService.requireOwnedTask(taskId, userService.getLoginUser(request).getId());
         SseEmitter emitter = new SseEmitter(timeoutMs);
         agentNodeInvocationExecutor.execute(() -> stream(taskId, lastEventId, emitter));
         return emitter;

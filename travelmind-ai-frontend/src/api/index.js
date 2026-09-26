@@ -8,11 +8,22 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
 // 创建axios实例
 const request = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000
+  timeout: 60000,
+  withCredentials: true
 })
 
 const idempotencyKey = () => globalThis.crypto?.randomUUID?.()
   || `task-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+// ==================== 用户与登录态 ====================
+
+export const login = (data) => request.post('/user/login', data)
+
+export const register = (data) => request.post('/user/register', data)
+
+export const getLoginUser = () => request.get('/user/get/login')
+
+export const logout = () => request.post('/user/logout')
 
 export const createAgentTask = (payload) => request.post('/agent/tasks', payload, {
   headers: { 'Idempotency-Key': idempotencyKey() }
@@ -21,23 +32,11 @@ export const createAgentTask = (payload) => request.post('/agent/tasks', payload
 export const getAgentTask = (taskId) => request.get(`/agent/tasks/${taskId}`)
 
 export const getAgentRun = (taskId) => {
-  const conversationId = localStorage.getItem('travel-conversation-id')
-  if (conversationId) {
-    return request.get(`/agent/tasks/${taskId}/run`, {
-      headers: { 'X-Conversation-Id': conversationId }
-    })
-  }
-  return request.get(`/admin/agent/runs/${taskId}`)
+  return request.get(`/agent/tasks/${taskId}/run`)
 }
 
 export const getAgentRunNode = (taskId, checkpointId) => {
-  const conversationId = localStorage.getItem('travel-conversation-id')
-  if (conversationId) {
-    return request.get(`/agent/tasks/${taskId}/run/nodes/${checkpointId}`, {
-      headers: { 'X-Conversation-Id': conversationId }
-    })
-  }
-  return request.get(`/admin/agent/runs/${taskId}/nodes/${checkpointId}`)
+  return request.get(`/agent/tasks/${taskId}/run/nodes/${checkpointId}`)
 }
 
 export const resumeAgentTask = (taskId, supplemental) => request.post(`/agent/tasks/${taskId}/resume`, {
@@ -49,6 +48,14 @@ export const cancelAgentTask = (taskId) => request.post(`/agent/tasks/${taskId}/
 export const clearAgentConversationMemory = (conversationId) => request.delete(
   `/agent/tasks/conversations/${encodeURIComponent(conversationId)}/memory`
 )
+
+export const listAgentConversations = () => request.get('/agent/conversations')
+export const createAgentConversation = (title = '') => request.post('/agent/conversations', { title })
+export const renameAgentConversation = (conversationId, title) => request.patch(`/agent/conversations/${conversationId}`, { title })
+export const archiveAgentConversation = conversationId => request.delete(`/agent/conversations/${conversationId}`)
+export const getAgentConversationMessages = conversationId => request.get(`/agent/conversations/${conversationId}/messages`)
+export const getTravelPreferences = () => request.get('/agent/conversations/preferences')
+export const saveTravelPreferences = preferences => request.put('/agent/conversations/preferences', preferences)
 
 // 所有规划进度和 Token 都从任务 Redis Stream 经 SSE 返回；浏览器重连会携带 Last-Event-ID。
 export const connectAgentTaskEvents = (taskId, handlers = {}) => {
@@ -132,6 +139,10 @@ export const getFileDownloadUrl = (path) => {
 }
 
 export default {
+  login,
+  register,
+  getLoginUser,
+  logout,
   createAgentTask,
   getAgentTask,
   getAgentRun,
@@ -139,6 +150,13 @@ export default {
   resumeAgentTask,
   cancelAgentTask,
   clearAgentConversationMemory,
+  listAgentConversations,
+  createAgentConversation,
+  renameAgentConversation,
+  archiveAgentConversation,
+  getAgentConversationMessages,
+  getTravelPreferences,
+  saveTravelPreferences,
   connectAgentTaskEvents,
   createTravelPlan,
   getTravelPlan,

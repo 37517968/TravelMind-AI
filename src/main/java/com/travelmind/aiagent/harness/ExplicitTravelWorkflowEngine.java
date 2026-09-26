@@ -85,7 +85,7 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
             resultPayload.put("metrics", state.getMetrics());
             String resultJson = objectMapper.writeValueAsString(resultPayload);
             taskMapper.markSucceeded(taskId, resultJson);
-            conversationMemory.appendAssistant(task.getConversationId(), answer);
+            conversationMemory.appendAssistant(task.getUserId(), task.getConversationId(), answer);
             eventStore.publish(taskId, "TASK", null, "SUCCEEDED",
                     chitchat ? "已回复用户" : "旅行方案生成完成", 100,
                     Map.of("resultAvailable", true, "responseType", chitchat ? "CHAT" : "PLAN"));
@@ -202,7 +202,8 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
      */
     private void restartForNewPlan(Long taskId, WorkflowState state, NodeExecutionResult intentResult) {
         if (!Boolean.TRUE.equals(intentResult.getData().get("newPlan"))) return;
-        planningDraftService.clear(Objects.toString(state.getRequest().get("conversationId"), ""));
+        planningDraftService.clear(longValue(state.getRequest().get("userId")),
+                Objects.toString(state.getRequest().get("conversationId"), ""));
         TravelIntentRouter.resetRequestForNewPlan(state.getRequest());
         state.retainOnly(intentResult.getData());
         log.info("Task {} restarts travel planning on a new request at supplemental version {}", taskId,
@@ -288,6 +289,11 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
         if (value instanceof Number n) return n.intValue();
         try { return value == null ? fallback : Integer.parseInt(value.toString()); }
         catch (NumberFormatException ignored) { return fallback; }
+    }
+    private static Long longValue(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        try { return value == null ? null : Long.parseLong(value.toString()); }
+        catch (NumberFormatException ignored) { return null; }
     }
     private static String truncate(String value) {
         if (value == null) return null;

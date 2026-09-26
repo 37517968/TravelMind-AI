@@ -55,8 +55,8 @@ public class AgentRunQueryService {
         return build(task);
     }
 
-    public AgentRunView getForConversation(Long taskId, String conversationId) {
-        AgentTask task = requireConversationTask(taskId, conversationId);
+    public AgentRunView getForUser(Long taskId, Long userId) {
+        AgentTask task = requireUserTask(taskId, userId);
         return build(task);
     }
 
@@ -64,8 +64,8 @@ public class AgentRunQueryService {
         return nodeDetail(requireTask(taskId), requireCheckpoint(taskId, checkpointId));
     }
 
-    public AgentNodeDetailView getNodeForConversation(Long taskId, Long checkpointId, String conversationId) {
-        return nodeDetail(requireConversationTask(taskId, conversationId), requireCheckpoint(taskId, checkpointId));
+    public AgentNodeDetailView getNodeForUser(Long taskId, Long checkpointId, Long userId) {
+        return nodeDetail(requireUserTask(taskId, userId), requireCheckpoint(taskId, checkpointId));
     }
 
     private AgentRunView build(AgentTask task) {
@@ -89,10 +89,10 @@ public class AgentRunQueryService {
         return task;
     }
 
-    private AgentTask requireConversationTask(Long taskId, String conversationId) {
+    private AgentTask requireUserTask(Long taskId, Long userId) {
         AgentTask task = requireTask(taskId);
-        if (!same(task.getConversationId(), conversationId)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看当前会话创建的任务链路");
+        if (userId == null || !userId.equals(task.getUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看当前用户自己的任务链路");
         }
         return task;
     }

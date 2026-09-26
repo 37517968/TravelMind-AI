@@ -234,6 +234,7 @@ public class TravelWorkflowNodeCatalog {
                     && draftInput.get("budget") != null);
         }
         mergeMeaningful(extractionInput, state.getRequest());
+        if (!modifying) applyUserPreferences(extractionInput, state.getRequest().get("userPreferences"));
         extractionInput.put("modificationMode", modifying);
         String promptText = TravelIntentRouter.currentInput(state.getRequest());
         String recentUserText = newPlan ? "" : TravelIntentRouter.recentUserPlanningText(
@@ -264,9 +265,11 @@ public class TravelWorkflowNodeCatalog {
                           specificAttractions 只填写用户明确点名的具体景点，例如“灵隐寺”“西湖”；
                           “海边”“古镇”“亲子”“拍照”等类别或偏好只能放 requiredAttractionTags，不能冒充具体景点。
                          已确认草稿：%s
+                         用户明确保存的长期偏好（只能作为软偏好，不能覆盖当前请求）：%s
                          最近用户原话：%s
                          当前用户请求：%s
                          """.formatted(objectMapper.writeValueAsString(planningDraftInput(state)),
+                        objectMapper.writeValueAsString(state.getRequest().getOrDefault("userPreferences", Map.of())),
                         recentUserText.isBlank() ? "（无）" : recentUserText, promptText);
                 String raw = sentinel.executeModel(() -> ChatClient.builder(chatModel).build()
                         .prompt().user(extractionPrompt).call().content());
@@ -275,6 +278,7 @@ public class TravelWorkflowNodeCatalog {
                 mergeMeaningful(extractionInput, inferred);
                 // 显式 API 字段优先于模型推断；空集合和 null 不会覆盖上一版约束。
                 mergeMeaningful(extractionInput, state.getRequest());
+                if (!modifying) applyUserPreferences(extractionInput, state.getRequest().get("userPreferences"));
                 extractionInput.put("prompt", extractionText);
                 extractionInput.put("modificationMode", modifying);
                 TravelConstraintSpec spec = constraintExtractor.extract(extractionInput);
@@ -299,6 +303,18 @@ public class TravelWorkflowNodeCatalog {
         if (!(rawPlan instanceof Map<?, ?> plan) || plan.get("constraintSpec") == null) return new LinkedHashMap<>();
         TravelConstraintSpec base = objectMapper.convertValue(plan.get("constraintSpec"), TravelConstraintSpec.class);
         return constraintInput(base);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyUserPreferences(Map<String, Object> extractionInput, Object rawPreferences) {
+        if (!(rawPreferences instanceof Map<?, ?> preferences) || preferences.isEmpty()) return;
+        Map<String, Object> constraints = extractionInput.get("constraints") instanceof Map<?, ?> existing
+                ? new LinkedHashMap<>((Map<String, Object>) existing) : new LinkedHashMap<>();
+        Map<String, Object> soft = constraints.get("softPreferences") instanceof Map<?, ?> existingSoft
+                ? new LinkedHashMap<>((Map<String, Object>) existingSoft) : new LinkedHashMap<>();
+        preferences.forEach((key, value) -> { if (key != null && value != null) soft.putIfAbsent(key.toString(), value); });
+        constraints.put("softPreferences", soft);
+        extractionInput.put("constraints", constraints);
     }
 
     private Map<String, Object> planningDraftInput(WorkflowState state) {
@@ -335,7 +351,7 @@ public class TravelWorkflowNodeCatalog {
 
     private void savePlanningDraft(WorkflowState state, TravelConstraintSpec spec) {
         String conversationId = Objects.toString(state.getRequest().get("conversationId"), "");
-        planningDraftService.save(conversationId, state.getTaskId(), spec);
+        planningDraftService.save(longValue(state.getRequest().get("userId")), conversationId, state.getTaskId(), spec);
     }
 
     private boolean isBlank(Object value) {
@@ -666,6 +682,12 @@ public class TravelWorkflowNodeCatalog {
         if (value instanceof Number number) return number.intValue();
         try { return value == null ? fallback : Integer.parseInt(value.toString()); }
         catch (NumberFormatException ignored) { return fallback; }
+    }
+
+    private static Long longValue(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        try { return value == null ? null : Long.parseLong(value.toString()); }
+        catch (NumberFormatException ignored) { return null; }
     }
 
     private static NodeExecutor node(String id, int retries, Function<WorkflowState, NodeExecutionResult> function) {

@@ -19,29 +19,36 @@ import java.util.Objects;
 public class AgentConversationMemoryService {
     private final ChatMemory chatMemory;
 
-    public List<Map<String, String>> snapshot(String conversationId) {
+    public List<Map<String, String>> snapshot(Long userId, String conversationId) {
         try {
-            return chatMemory.get(conversationId).stream().map(this::view).toList();
+            return chatMemory.get(scoped(userId, conversationId)).stream().map(this::view).toList();
         } catch (RuntimeException failure) {
             log.warn("Unable to load conversation memory {}: {}", conversationId, failure.getMessage());
             return List.of();
         }
     }
 
-    public void appendUser(String conversationId, String content) {
-        append(conversationId, new UserMessage(Objects.toString(content, "")));
+    public void appendUser(Long userId, String conversationId, String content) {
+        append(scoped(userId, conversationId), new UserMessage(Objects.toString(content, "")));
     }
 
-    public void appendAssistant(String conversationId, String content) {
-        append(conversationId, new AssistantMessage(Objects.toString(content, "")));
+    public void appendAssistant(Long userId, String conversationId, String content) {
+        append(scoped(userId, conversationId), new AssistantMessage(Objects.toString(content, "")));
     }
 
-    public void clear(String conversationId) {
+    public void clear(Long userId, String conversationId) {
         try {
-            chatMemory.clear(conversationId);
+            chatMemory.clear(scoped(userId, conversationId));
         } catch (RuntimeException failure) {
             log.warn("Unable to clear conversation memory {}: {}", conversationId, failure.getMessage());
         }
+    }
+
+    private String scoped(Long userId, String conversationId) {
+        if (userId == null || conversationId == null || conversationId.isBlank()) {
+            throw new IllegalArgumentException("用户和会话不能为空");
+        }
+        return "user:" + userId + ":conversation:" + conversationId;
     }
 
     private void append(String conversationId, Message message) {

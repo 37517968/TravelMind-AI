@@ -1,7 +1,9 @@
 <script setup>
+import AuthNav from './components/AuthNav.vue'
 </script>
 
 <template>
+  <AuthNav />
   <router-view />
 </template>
 

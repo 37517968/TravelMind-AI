@@ -249,6 +249,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!-- 登录 Session 统一落 Redis，支持 API 多副本和容器重启后的会话恢复 -->
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
         <!-- Phase 4：工具/模型流控、熔断和热点用户限流 -->
         <dependency>
             <groupId>com.alibaba.csp</groupId>

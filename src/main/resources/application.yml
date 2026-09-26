@@ -30,6 +30,10 @@ spring:
           max-wait: -1ms
           max-idle: 8
           min-idle: 0
+  session:
+    store-type: redis
+    redis:
+      namespace: travelmind:session
   rabbitmq:
     host: localhost
     port: 5672
@@ -102,6 +106,12 @@ server:
   shutdown: graceful
   servlet:
     context-path: /api
+    session:
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 management:
   endpoints:

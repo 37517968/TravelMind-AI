@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
  * 用户接口
  */
 @RestController
-@RequestMapping("/api/user")
+@RequestMapping("/user")
 @Slf4j
 @Tag(name = "用户接口")
 public class UserController {

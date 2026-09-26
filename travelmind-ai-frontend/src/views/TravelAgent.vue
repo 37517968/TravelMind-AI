@@ -7,6 +7,18 @@
     </div>
     
     <div class="content-wrapper">
+      <aside class="conversation-panel">
+        <button class="new-conversation" @click="newConversation">＋ 新建会话</button>
+        <div class="conversation-list">
+          <button v-for="item in conversations" :key="item.conversationId"
+                  :class="['conversation-item', item.conversationId === conversationId && 'active']"
+                  @click="switchConversation(item.conversationId)">
+            <span>{{ item.title }}</span>
+            <small>{{ formatConversationTime(item.updatedAt) }}</small>
+          </button>
+        </div>
+        <button v-if="conversationId" class="archive-conversation" @click="archiveCurrentConversation">归档当前会话</button>
+      </aside>
       <div class="chat-area">
         <ChatRoom 
           :messages="messages" 
@@ -62,7 +74,9 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppFooter from '../components/AppFooter.vue'
-import { createAgentTask, getAgentTask, resumeAgentTask, connectAgentTaskEvents } from '../api'
+import { createAgentTask, getAgentTask, resumeAgentTask, connectAgentTaskEvents,
+  listAgentConversations, createAgentConversation, archiveAgentConversation,
+  getAgentConversationMessages } from '../api'
 
 // 设置页面标题和元数据
 useHead({
@@ -82,10 +96,8 @@ useHead({
 const router = useRouter()
 const messages = ref([])
 const connectionStatus = ref('disconnected')
-const conversationId = localStorage.getItem('travel-conversation-id')
-  || globalThis.crypto?.randomUUID?.()
-  || `travel-${Date.now()}`
-localStorage.setItem('travel-conversation-id', conversationId)
+const conversations = ref([])
+const conversationId = ref('')
 
 let eventSource = null
 let activeTaskId = null
@@ -93,6 +105,69 @@ let activeTaskId = null
 let lastSucceededPlanTaskId = null
 let waitingForUser = false
 let answerMessageIndex = -1
+
+const welcome = `你好！我是AI旅行管家 🌍
+
+我可以帮你：
+• 🗺️ 规划旅行行程
+• 🌤️ 查询目的地天气
+• 🏨 推荐酒店住宿
+• 🍜 发现当地美食
+• 📍 搜索热门景点
+• 💰 估算旅行预算
+• 📄 生成行程PDF
+
+告诉我你想去哪里玩，或者有什么旅行想法？`
+
+const resetRuntime = () => {
+  eventSource?.close(); eventSource = null; activeTaskId = null; waitingForUser = false
+  lastSucceededPlanTaskId = null; answerMessageIndex = -1; connectionStatus.value = 'disconnected'
+}
+
+const loadConversations = async () => {
+  const { data } = await listAgentConversations()
+  conversations.value = data || []
+  if (!conversations.value.length) {
+    const created = await createAgentConversation()
+    conversations.value = [created.data]
+  }
+  const remembered = localStorage.getItem('travel-conversation-id')
+  const selected = conversations.value.find(item => item.conversationId === remembered) || conversations.value[0]
+  await switchConversation(selected.conversationId)
+}
+
+const switchConversation = async id => {
+  if (!id || id === conversationId.value) return
+  resetRuntime()
+  conversationId.value = id
+  localStorage.setItem('travel-conversation-id', id)
+  const { data } = await getAgentConversationMessages(id)
+  messages.value = (data || []).map(item => ({
+    content: item.content,
+    isUser: item.role === 'USER',
+    type: item.role === 'USER' ? 'user-question' : 'ai-answer',
+    time: Date.now()
+  }))
+  if (!messages.value.length) addMessage(welcome, false)
+}
+
+const newConversation = async () => {
+  const { data } = await createAgentConversation()
+  conversations.value.unshift(data)
+  const previous = conversationId.value
+  conversationId.value = ''
+  await switchConversation(data.conversationId)
+  if (previous === data.conversationId) conversationId.value = data.conversationId
+}
+
+const archiveCurrentConversation = async () => {
+  if (!conversationId.value || !confirm('归档后会清除该会话的短期上下文，确定继续吗？')) return
+  await archiveAgentConversation(conversationId.value)
+  resetRuntime(); conversationId.value = ''; messages.value = []
+  await loadConversations()
+}
+
+const formatConversationTime = value => value ? new Date(value).toLocaleDateString() : ''
 
 // 添加消息到列表
 const addMessage = (content, isUser, type = '', extra = {}) => {
@@ -252,6 +327,7 @@ const subscribeTask = (taskId) => {
 
 // 所有用户输入统一进入 /agent/tasks；WAITING_USER 状态下作为 supplemental 恢复同一任务。
 const sendMessage = async (message) => {
+  if (!conversationId.value) return
   if (activeTaskId && !waitingForUser) {
     addMessage('当前规划任务仍在执行，请等待完成后再发起新任务。', false, 'ai-question')
     return
@@ -269,7 +345,7 @@ const sendMessage = async (message) => {
     }
 
     const { data } = await createAgentTask({
-      conversationId,
+      conversationId: conversationId.value,
       taskType: 'PLAN',
       ...(lastSucceededPlanTaskId ? { baseTaskId: lastSucceededPlanTaskId } : {}),
       prompt: message,
@@ -326,20 +402,7 @@ const goBack = () => {
 }
 
 // 页面加载时添加欢迎消息
-onMounted(() => {
-  addMessage(`你好！我是AI旅行管家 🌍
-
-我可以帮你：
-• 🗺️ 规划旅行行程
-• 🌤️ 查询目的地天气
-• 🏨 推荐酒店住宿
-• 🍜 发现当地美食
-• 📍 搜索热门景点
-• 💰 估算旅行预算
-• 📄 生成行程PDF
-
-告诉我你想去哪里玩，或者有什么旅行想法？`, false)
-})
+onMounted(loadConversations)
 
 // 组件销毁前关闭SSE连接
 onBeforeUnmount(() => {
@@ -409,11 +472,22 @@ onBeforeUnmount(() => {
 }
 
 .content-wrapper {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
   flex: 1;
   padding: 16px;
 }
+
+.conversation-panel { grid-row: 1 / 3; display: flex; flex-direction: column; min-height: 0; padding: 12px; border-radius: 18px; background: rgba(255,255,255,.92); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+.new-conversation { width: 100%; padding: 11px; border: 0; border-radius: 11px; color: white; background: linear-gradient(135deg,#667eea,#7654c6); font-weight: 700; }
+.conversation-list { display: flex; flex: 1; flex-direction: column; gap: 7px; margin: 12px 0; overflow-y: auto; }
+.conversation-item { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 11px; border: 1px solid transparent; border-radius: 10px; color: #4d5870; background: transparent; text-align: left; }
+.conversation-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-item small { color: #9299aa; }
+.conversation-item:hover, .conversation-item.active { border-color: #dcd7fb; background: #f0edff; color: #5746aa; }
+.archive-conversation { padding: 8px; border: 0; color: #858c9c; background: transparent; font-size: 12px; }
 
 .chat-area {
   flex: 1;
@@ -497,7 +571,12 @@ onBeforeUnmount(() => {
   
   .content-wrapper {
     padding: 12px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
+  .conversation-panel { grid-row: auto; max-height: 150px; }
+  .conversation-list { flex-direction: row; overflow-x: auto; }
+  .conversation-item { min-width: 145px; }
   
   .chat-area {
     min-height: calc(100vh - 180px);

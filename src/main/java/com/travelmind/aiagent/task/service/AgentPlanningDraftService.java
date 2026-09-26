@@ -34,10 +34,10 @@ public class AgentPlanningDraftService {
         this.ttl = ttl;
     }
 
-    public Map<String, Object> load(String conversationId) {
+    public Map<String, Object> load(Long userId, String conversationId) {
         if (conversationId == null || conversationId.isBlank()) return Map.of();
         try {
-            String json = redis.opsForValue().get(key(conversationId));
+            String json = redis.opsForValue().get(key(userId, conversationId));
             return json == null || json.isBlank() ? Map.of() : objectMapper.readValue(json, MAP_TYPE);
         } catch (Exception failure) {
             log.warn("Unable to load planning draft {}: {}", conversationId, failure.getMessage());
@@ -45,10 +45,10 @@ public class AgentPlanningDraftService {
         }
     }
 
-    public void save(String conversationId, Long taskId, TravelConstraintSpec spec) {
+    public void save(Long userId, String conversationId, Long taskId, TravelConstraintSpec spec) {
         if (conversationId == null || conversationId.isBlank() || spec == null) return;
         try {
-            Map<String, Object> previous = load(conversationId);
+            Map<String, Object> previous = load(userId, conversationId);
             long previousTaskId = longValue(previous.get("sourceTaskId"), -1L);
             // 较早的并发任务不能覆盖同一会话中较新的规划草稿。
             if (taskId != null && previousTaskId > taskId) return;
@@ -60,25 +60,26 @@ public class AgentPlanningDraftService {
             draft.put("missingFields", spec.missingRequiredFields());
             draft.put("status", spec.complete() ? "READY" : "COLLECTING");
             draft.put("updatedAtEpochMs", System.currentTimeMillis());
-            redis.opsForValue().set(key(conversationId), objectMapper.writeValueAsString(draft), ttl);
+            redis.opsForValue().set(key(userId, conversationId), objectMapper.writeValueAsString(draft), ttl);
         } catch (Exception failure) {
             log.warn("Unable to save planning draft {}: {}", conversationId, failure.getMessage());
         }
     }
 
-    public void clear(String conversationId) {
+    public void clear(Long userId, String conversationId) {
         if (conversationId == null || conversationId.isBlank()) return;
         try {
-            redis.delete(key(conversationId));
+            redis.delete(key(userId, conversationId));
         } catch (RuntimeException failure) {
             log.warn("Unable to clear planning draft {}: {}", conversationId, failure.getMessage());
         }
     }
 
-    private String key(String conversationId) {
+    private String key(Long userId, String conversationId) {
         try {
+            if (userId == null) throw new IllegalArgumentException("用户不能为空");
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(conversationId.getBytes(StandardCharsets.UTF_8));
+                    .digest((userId + ":" + conversationId).getBytes(StandardCharsets.UTF_8));
             return "agent:planning:draft:" + HexFormat.of().formatHex(digest);
         } catch (Exception failure) {
             throw new IllegalStateException("SHA-256 unavailable", failure);
