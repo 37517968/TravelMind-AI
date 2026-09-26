@@ -19,7 +19,10 @@ class TravelPlanValidatorTest {
         TravelConstraintSpec spec = new TravelConstraintSpec("", "上海", null, 2, 1, 300_000L, "CNY",
                 List.of(), List.of(), List.of("外滩", "豫园"), List.of(), null, Map.of(), Map.of(), 1);
         Instant now = Instant.now();
-        List<TravelCandidate> selected = List.of(attraction("bund", "外滩", now), attraction("yuyuan", "豫园", now));
+        List<TravelCandidate> selected = List.of(
+                attraction("bund", "外滩", now),
+                attraction("yuyuan", "豫园", now),
+                hotel("hotel", "上海酒店", now));
         TravelSolverResult solution = new TravelSolverResult(TravelSolverResult.SolverStatus.SAT, selected,
                 10_000, List.of(), List.of(), 1, Map.of());
 
@@ -35,5 +38,10 @@ class TravelPlanValidatorTest {
     private TravelCandidate attraction(String id, String name, Instant now) {
         return new TravelCandidate(id, TravelCandidate.CandidateType.ATTRACTION, name, "上海", 5_000,
                 120, 0, List.of(), true, now, now.plusSeconds(600), "TEST", Map.of());
+    }
+
+    private TravelCandidate hotel(String id, String name, Instant now) {
+        return new TravelCandidate(id, TravelCandidate.CandidateType.HOTEL, name, "上海", 30_000,
+                0, 2, List.of("住宿"), true, now, now.plusSeconds(600), "TEST", Map.of());
     }
 }
