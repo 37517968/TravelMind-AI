@@ -6,6 +6,17 @@
       </div>
       <p class="subtitle">/ 智能规划，畅游天下 /</p>
       <div class="cyber-line"></div>
+      <div v-if="!authState.user" class="account-entry" aria-label="账户入口">
+        <span>登录后可保存行程、管理多个会话并同步旅行偏好</span>
+        <div class="account-actions">
+          <router-link class="account-login" to="/login">登录</router-link>
+          <router-link class="account-register" to="/register">免费注册</router-link>
+        </div>
+      </div>
+      <div v-else class="account-entry signed-in">
+        <span>你好，{{ authState.user.userName || authState.user.userAccount }}</span>
+        <router-link class="account-register" to="/travel-agent">继续规划</router-link>
+      </div>
     </div>
     
     <div class="apps-container">
@@ -81,6 +92,7 @@
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import AppFooter from '../components/AppFooter.vue'
+import { authState } from '../auth'
 
 // 设置页面标题和元数据
 useHead({
@@ -168,6 +180,41 @@ const navigateTo = (path) => {
   margin: 0 auto;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
 }
+
+.account-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 24px auto 0;
+  padding: 10px 12px 10px 18px;
+  color: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 16px;
+  background: rgba(23, 27, 65, .2);
+  box-shadow: 0 12px 30px rgba(30, 28, 73, .14);
+  backdrop-filter: blur(12px);
+  font-size: .9rem;
+}
+
+.account-actions { display: flex; align-items: center; gap: 8px; }
+.account-login,
+.account-register {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.account-login { color: white; border: 1px solid rgba(255,255,255,.42); }
+.account-register { color: #5f4bc2; background: white; box-shadow: 0 7px 18px rgba(26, 24, 70, .16); }
+.signed-in { padding-left: 16px; }
 
 .apps-container {
   display: flex;

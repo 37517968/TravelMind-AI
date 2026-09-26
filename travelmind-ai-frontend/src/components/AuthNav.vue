@@ -1,6 +1,6 @@
 <template>
   <nav class="auth-nav" aria-label="用户导航">
-    <template v-if="authState.initialized && authState.user">
+    <template v-if="authState.user">
       <span class="avatar">{{ avatarText }}</span>
       <span class="identity">
         <strong>{{ authState.user.userName || authState.user.userAccount }}</strong>
@@ -9,11 +9,10 @@
       <router-link class="secondary preferences" to="/preferences">偏好</router-link>
       <button type="button" :disabled="authState.loading" @click="signOut">退出</button>
     </template>
-    <template v-else-if="authState.initialized">
+    <template v-else>
       <router-link class="secondary" to="/register">注册</router-link>
       <router-link class="primary" :to="loginTarget">登录</router-link>
     </template>
-    <span v-else class="checking">正在确认登录状态…</span>
   </nav>
 </template>
 
@@ -45,6 +44,5 @@ a, button { border: 0; border-radius: 10px; padding: 8px 13px; font: inherit; fo
 .primary { color: white; background: linear-gradient(135deg,#667eea,#764ba2); }
 .secondary, button { color: #515b70; background: #f0f2f8; }
 button:disabled { cursor: wait; opacity: .6; }
-.checking { padding: 0 8px; color: #70798b; font-size: 12px; }
 @media (max-width: 560px) { .auth-nav { top: 10px; right: 10px; } .identity, .preferences { display: none; } }
 </style>
