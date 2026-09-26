@@ -96,6 +96,39 @@ class DeterministicTravelConstraintSolverTest {
         assertThat(String.valueOf(result.diagnostics().get("dataGaps"))).contains("attraction_availability");
     }
 
+    @Test
+    void selectedRouteShouldKeepEveryChosenAttraction() {
+        TravelConstraintSpec selectedRoute = new TravelConstraintSpec("", "上海", null, 2, 1, 300_000L,
+                "CNY", List.of(), List.of(), List.of("外滩", "豫园", "上海博物馆"), List.of(),
+                null, Map.of(), Map.of(), 1);
+        Instant now = Instant.now();
+        TravelCandidateSet candidates = new TravelCandidateSet(List.of(), List.of(), List.of(
+                namedCandidate("bund", "外滩", now), namedCandidate("yuyuan", "豫园", now),
+                namedCandidate("museum", "上海博物馆", now), namedCandidate("cheap", "外滩观景台", now)),
+                List.of(), now);
+
+        TravelSolverResult result = solver.solve(selectedRoute, candidates);
+
+        assertThat(result.status()).isEqualTo(TravelSolverResult.SolverStatus.SAT);
+        assertThat(result.selected()).extracting(TravelCandidate::name)
+                .contains("外滩", "豫园", "上海博物馆");
+    }
+
+    @Test
+    void missingSelectedAttractionShouldNotSilentlyGenerateAnotherRoute() {
+        TravelConstraintSpec selectedRoute = new TravelConstraintSpec("", "上海", null, 2, 1, 300_000L,
+                "CNY", List.of(), List.of(), List.of("外滩", "豫园"), List.of(),
+                null, Map.of(), Map.of(), 1);
+        Instant now = Instant.now();
+        TravelCandidateSet candidates = new TravelCandidateSet(List.of(), List.of(),
+                List.of(namedCandidate("bund", "外滩", now)), List.of(), now);
+
+        TravelSolverResult result = solver.solve(selectedRoute, candidates);
+
+        assertThat(result.status()).isEqualTo(TravelSolverResult.SolverStatus.UNSAT);
+        assertThat(result.unsatCore()).contains("specific_attraction:豫园");
+    }
+
     private TravelCandidate unavailable(TravelCandidate item) {
         return new TravelCandidate(item.id(), item.type(), item.name(), item.city(), item.unitCostCents(),
                 item.durationMinutes(), item.capacity(), item.tags(), false, item.observedAt(), item.expiresAt(),
@@ -120,5 +153,10 @@ class DeterministicTravelConstraintSolverTest {
         Instant now = Instant.now();
         return new TravelCandidate(id, type, id, "上海", cost, 120, 4, tags, true, now,
                 now.plusSeconds(600), "TEST", Map.of("priceConfidence", "CONFIRMED"));
+    }
+
+    private TravelCandidate namedCandidate(String id, String name, Instant now) {
+        return new TravelCandidate(id, TravelCandidate.CandidateType.ATTRACTION, name, "上海", 5_000,
+                120, 0, List.of("通用景点"), true, now, now.plusSeconds(600), "TEST", Map.of());
     }
 }

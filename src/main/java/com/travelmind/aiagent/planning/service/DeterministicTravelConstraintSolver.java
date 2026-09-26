@@ -31,6 +31,7 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
 
         chooseTransport(spec, candidates, selected, core, gaps);
         chooseHotel(spec, candidates, selected, core, gaps);
+        chooseSpecificAttractions(spec.specificAttractions(), candidates.attractions(), selected, core);
         chooseTagged(spec.requiredAttractionTags(), candidates.attractions(), "required_attraction_tags", selected, core, gaps);
         chooseTagged(spec.requiredCuisineTags(), candidates.restaurants(), "required_cuisine_tags", selected, core, gaps);
         chooseAttractions(spec, candidates, selected, gaps);
@@ -42,6 +43,21 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
                 : Math.max(0D, 100D - (total * 100D / spec.maxBudgetCents()));
         return new TravelSolverResult(TravelSolverResult.SolverStatus.SAT, selected, total, List.of(), List.of(),
                 score, diagnostics(gaps, candidates.all().size()));
+    }
+
+    /** 用户点名或在路线卡片中选中的每个景点都是硬约束，不能被便宜景点或相似名称替换。 */
+    private void chooseSpecificAttractions(List<String> required, List<TravelCandidate> pool,
+                                           List<TravelCandidate> selected, Set<String> core) {
+        for (String name : required) {
+            TravelCandidate exact = pool.stream().filter(item -> exactName(item.name(), name)).findFirst().orElse(null);
+            TravelCandidate match = exact != null ? exact : pool.stream()
+                    .filter(item -> matchesName(item.name(), name)).findFirst().orElse(null);
+            if (match == null) {
+                core.add("specific_attraction:" + name);
+            } else if (!selected.contains(match)) {
+                selected.add(match);
+            }
+        }
     }
 
     private void chooseTransport(TravelConstraintSpec spec, TravelCandidateSet set, List<TravelCandidate> selected,
@@ -134,6 +150,10 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
         if (core.stream().anyMatch(item -> item.startsWith("required_")))
             suggestions.add(new TravelSolverResult.RelaxationSuggestion("required_tags",
                     "部分必选类别没有可用候选，可将其从硬约束改为偏好", Map.of("relaxRequiredTags", true), 0));
+        if (core.stream().anyMatch(item -> item.startsWith("specific_attraction:")))
+            suggestions.add(new TravelSolverResult.RelaxationSuggestion("specific_attraction",
+                    "部分选中景点未取得可靠地点数据，请重新选择路线或稍后重试",
+                    Map.of("reselectAttractionRoute", true), 0));
         if (core.contains("transport_availability")) suggestions.add(new TravelSolverResult.RelaxationSuggestion(
                 "transport_availability", "没有满足出行方式或人数的交通候选，可放宽交通方式",
                 Map.of("allowedTransportModes", List.of()), 0));
@@ -162,4 +182,14 @@ public class DeterministicTravelConstraintSolver implements TravelConstraintSolv
 
     private boolean usable(TravelCandidate item) { return item.available(); }
     private Comparator<TravelCandidate> byCost() { return Comparator.comparingLong(TravelCandidate::unitCostCents); }
+    private boolean exactName(String candidate, String requested) {
+        return normalizeName(candidate).equals(normalizeName(requested));
+    }
+    private boolean matchesName(String candidate, String requested) {
+        String left = normalizeName(candidate), right = normalizeName(requested);
+        return !left.isBlank() && !right.isBlank() && (left.contains(right) || right.contains(left));
+    }
+    private String normalizeName(String value) {
+        return value == null ? "" : value.replaceAll("[\\s·•()（）\\-—]", "").trim();
+    }
 }

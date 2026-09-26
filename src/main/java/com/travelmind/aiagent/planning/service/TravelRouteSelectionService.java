@@ -19,7 +19,6 @@ import java.util.Set;
 /** 决定是否需要用户先选择景点路线，并把选定路线收敛为后续求解器的候选域。 */
 @Component
 public class TravelRouteSelectionService {
-    private static final List<String> TITLES = List.of("经典必游路线", "轻松漫游路线", "城市深度路线");
     private static final List<String> EMOJIS = List.of("✨", "🌿", "🧭");
 
     public SelectionDecision decide(TravelConstraintSpec spec, TravelCandidateSet candidates,
@@ -68,10 +67,18 @@ public class TravelRouteSelectionService {
             List<TravelRouteOption.RouteAttraction> stops = route.stream().map(this::attraction).toList();
             String summary = "约 " + Math.max(1, (int) Math.ceil(stops.size() / 2D))
                     + " 天，串联 " + stops.size() + " 个景点；选择后再细排交通、餐饮与住宿。";
-            unique.put(signature, new TravelRouteOption("route-" + (i + 1), spec.destination(), TITLES.get(i), EMOJIS.get(i),
+            unique.put(signature, new TravelRouteOption("route-" + (i + 1), spec.destination(), fallbackTitle(stops), EMOJIS.get(i),
                     summary, stops));
         }
         return List.copyOf(unique.values());
+    }
+
+    /** 模型不可用时仍由真实 POI 生成标题，避免退回固定模板。 */
+    private String fallbackTitle(List<TravelRouteOption.RouteAttraction> stops) {
+        String landmarks = stops.stream().map(TravelRouteOption.RouteAttraction::name)
+                .filter(Objects::nonNull).filter(name -> !name.isBlank()).limit(2)
+                .reduce((left, right) -> left + "·" + right).orElse("城市精选");
+        return landmarks + "游览线";
     }
 
     private List<TravelCandidate> stride(List<TravelCandidate> source, int start, int limit) {
@@ -105,11 +112,27 @@ public class TravelRouteSelectionService {
     }
 
     private TravelCandidateSet narrow(TravelCandidateSet source, Set<String> ids, Set<String> names) {
-        List<TravelCandidate> matched = source.attractions().stream().filter(item -> ids.contains(item.id())
-                || matchesAnyName(item.name(), names)).toList();
+        Map<String, TravelCandidate> matched = new LinkedHashMap<>();
+        source.attractions().stream().filter(item -> ids.contains(item.id()))
+                .forEach(item -> matched.putIfAbsent(item.id(), item));
+        for (String name : names) {
+            TravelCandidate best = source.attractions().stream()
+                    .filter(item -> exactName(item.name(), name)).findFirst()
+                    .orElseGet(() -> source.attractions().stream()
+                            .filter(item -> matchesName(item.name(), name)).findFirst().orElse(null));
+            if (best != null) matched.putIfAbsent(best.id(), best);
+        }
         if (matched.isEmpty()) return source;
-        return new TravelCandidateSet(source.transports(), source.hotels(), matched, source.restaurants(),
+        return new TravelCandidateSet(source.transports(), source.hotels(), List.copyOf(matched.values()), source.restaurants(),
                 source.collectedAt());
+    }
+
+    private boolean exactName(String candidateName, String requestedName) {
+        return normalizeName(candidateName).equals(normalizeName(requestedName));
+    }
+
+    private String normalizeName(String value) {
+        return value == null ? "" : value.replaceAll("[\\s·•()（）\\-—]", "").trim();
     }
 
     private Set<String> matchedNames(List<TravelCandidate> attractions, Set<String> names) {
@@ -118,10 +141,6 @@ public class TravelRouteSelectionService {
             if (attractions.stream().anyMatch(item -> matchesName(item.name(), name))) matched.add(name);
         }
         return matched;
-    }
-
-    private boolean matchesAnyName(String candidateName, Set<String> names) {
-        return names.stream().anyMatch(name -> matchesName(candidateName, name));
     }
 
     private boolean matchesName(String candidateName, String requestedName) {

@@ -58,6 +58,12 @@ public class TravelConstraintExtractor {
         List<String> specificAttractions = stringList(firstValue(
                 safe.get("specificAttractions"), constraints.get("specificAttractions")));
         if (specificAttractions.isEmpty()) specificAttractions = namedAttractions(prompt);
+        List<String> selectedAttractions = stringList(safe.get("selectedAttractionNames"));
+        if (!selectedAttractions.isEmpty()) {
+            java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>(specificAttractions);
+            merged.addAll(selectedAttractions);
+            specificAttractions = List.copyOf(merged);
+        }
         String resolvedDestination = destination;
         specificAttractions = specificAttractions.stream()
                 .map(String::trim)

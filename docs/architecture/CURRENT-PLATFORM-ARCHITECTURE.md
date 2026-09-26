@@ -4,7 +4,7 @@
 
 本文描述当前仓库已经落地的架构，而不是最终规划稿。平台统一使用 `/api/agent/tasks` 作为 AI 入口：所有咨询与规划先创建异步任务，再通过任务 SSE 接收进度、追问和 Token，通过 `resume` 补充信息。旧 `/api/ai/**` 已删除，不提供兼容转发，前端也不再调用。
 
-当前尚未上线完整 Chat History、滚动摘要、用户画像和向量长期记忆；这些能力不能当作已经实现。
+当前已上线用户显式维护的结构化旅行偏好，但尚未上线完整 Chat History、滚动摘要、自动画像和向量长期记忆；这些未完成能力不能当作已经实现。
 
 ## 2. 总体架构与技术选型
 
@@ -55,7 +55,6 @@ flowchart TB
     CLIENT --> INGRESS
     INGRESS --> TASK_API
     INGRESS --> SSE_API
-    INGRESS --> CHAT_API
     INGRESS --> COMMUNITY_API
 
     TASK_API --> MYSQL
@@ -175,9 +174,10 @@ sequenceDiagram
         H->>G: CONTEXT_BUILDING，Hybrid RAG 获取证据
         H->>G: CANDIDATE_RETRIEVAL，经 ToolGateway 获取类型化候选
         alt 用户未点名具体景点
+            H->>L: 基于每条路线的真实 POI 组合批量生成动态标题
             H->>C: ROUTE_SELECTION，通过 SSE 返回多条 POI 路线卡片
-            C->>A: /resume + selectedRouteId/selectedAttractionIds
-            H->>H: 收窄候选域后进入详细规划
+            C->>A: /resume + selectedRouteId/selectedAttractionIds/selectedAttractionNames
+            H->>H: 选中景点进入 specificAttractions 硬约束并逐一精确检索
         else 已点名灵隐寺/西湖等景点
             H->>H: 跳过路线选择，逐一核验指定 POI
         end
@@ -306,7 +306,7 @@ PlanningDraft 是跨任务的临时结构化上下文，不替代 MySQL 中的�
 
 - MySQL 全量 Chat History；
 - 会话滚动摘要；
-- 用户画像和结构化长期偏好；
+- 自动用户画像（显式白名单旅行偏好已实现）；
 - PGVector 长期语义记忆；
 - 自动遗忘、用户数据导出和跨存储隐私删除编排。
 
@@ -353,7 +353,7 @@ System Policy
 
 ### 5.3 当前上下文压缩边界
 
-统一任务入口使用以下粗粒度边界控制增长：跨任务会话窗口最多 50 条消息，单任务使用模型调用预算、类型化候选、Tool 结果裁剪和 RAG TopK。当前尚未实现真正的 Token-aware Context Envelope；最终生成仍会读取 `WorkflowState.snapshot()`，候选和证据规模增长时仍需进一步压缩。
+统一任务入口使用以下粗粒度边界控制增长：跨任务会话窗口最多 50 条消息，单任务使用模型调用预算、类型化候选、Tool 结果裁剪和 RAG TopK；最终生成只装配约束简报、求解简报、地图计划和 TopK 知识证据，不直接传入完整 `WorkflowState.snapshot()`。当前尚未实现真正的 Token-aware Context Envelope，候选和证据规模增长时仍需进一步压缩。
 
 下一阶段建议按以下优先级落地，文档当前只将其记录为计划：
 
@@ -382,4 +382,4 @@ System Policy
 
 ## 7. 当前结论
 
-当前项目已经形成“可靠异步任务外壳 + 可恢复 Planning Agent + 按需 Tool/RAG + SSE 流式事件 + MySQL 最终事实源”的主链路。记忆目前完成了 Redis 短期会话窗口、会话级 PlanningDraft、MySQL 执行状态和外部知识记忆；完整历史、滚动摘要、用户画像和精确 Token 上下文压缩仍应作为下一阶段工作。
+当前项目已经形成“可靠异步任务外壳 + 可恢复 Planning Agent + 按需 Tool/RAG + SSE 流式事件 + MySQL 最终事实源”的主链路。记忆目前完成了 Redis 短期会话窗口、会话级 PlanningDraft、MySQL 显式用户偏好、执行状态和外部知识记忆；完整历史、滚动摘要、自动画像和精确 Token 上下文压缩仍应作为下一阶段工作。

@@ -21,6 +21,9 @@ class TravelRouteSelectionServiceTest {
         assertThat(decision.waitingForSelection()).isTrue();
         assertThat(decision.options()).hasSizeGreaterThanOrEqualTo(2);
         assertThat(decision.options()).allSatisfy(option -> assertThat(option.attractions()).isNotEmpty());
+        assertThat(decision.options()).allSatisfy(option -> assertThat(option.title())
+                .contains(option.attractions().getFirst().name())
+                .doesNotContain("经典必游路线", "轻松漫游路线", "城市深度路线"));
     }
 
     @Test
@@ -51,6 +54,21 @@ class TravelRouteSelectionServiceTest {
         assertThat(decision.selectedRouteId()).isEqualTo("route-2");
         assertThat(decision.candidates().attractions()).extracting(TravelCandidate::id)
                 .containsExactlyInAnyOrder("west-lake", "lingyin");
+    }
+
+    @Test
+    void selectedNameShouldPreferExactPoiInsteadOfAllRelatedPois() {
+        Instant now = Instant.now();
+        TravelCandidateSet set = new TravelCandidateSet(List.of(), List.of(), List.of(
+                attraction("bund", "外滩", now),
+                attraction("bund-finance", "外滩金融中心", now),
+                attraction("yuyuan", "豫园", now)), List.of(), now);
+
+        var decision = service.decide(spec(List.of()), set, Map.of(
+                "selectedAttractionNames", List.of("外滩", "豫园")));
+
+        assertThat(decision.candidates().attractions()).extracting(TravelCandidate::name)
+                .containsExactly("外滩", "豫园");
     }
 
     private TravelConstraintSpec spec(List<String> specific) {

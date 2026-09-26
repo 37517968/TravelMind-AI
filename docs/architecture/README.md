@@ -26,5 +26,7 @@ ADR 用来记录“为什么这样设计”，避免几个月后只看到代码�
 - [Phase 5：故障演练清单](PHASE5-FAILURE-DRILL.md)
 - [Phase 6：当前架构图与关键时序](PHASE6-ARCHITECTURE-AND-SEQUENCE.md)
 - [Phase 6：简历项目材料](PHASE6-RESUME-PROJECT.md)
+- [当前可直接使用的简历版本](CURRENT-RESUME.md)
+- [Agent 旅行决策平台总复习](PROJECT-REVIEW.md)
 - [Phase 6：简历能力证据矩阵](PHASE6-EVIDENCE-MATRIX.md)
 - [Phase 6：技术选型与面试话术](PHASE6-INTERVIEW-GUIDE.md)

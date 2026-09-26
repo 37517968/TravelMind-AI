@@ -3,6 +3,7 @@ package com.travelmind.aiagent.planning.service;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,5 +70,15 @@ class TravelConstraintExtractorTest {
 
         assertThat(spec.destination()).isEqualTo("上海");
         assertThat(spec.specificAttractions()).isEmpty();
+    }
+
+    @Test
+    void selectedRouteAttractionsShouldBecomeHardPlanningRequirements() {
+        var spec = extractor.extract(Map.of(
+                "prompt", "规划上海旅行",
+                "destination", "上海",
+                "selectedAttractionNames", List.of("外滩", "豫园", "上海博物馆")));
+
+        assertThat(spec.specificAttractions()).containsExactly("外滩", "豫园", "上海博物馆");
     }
 }

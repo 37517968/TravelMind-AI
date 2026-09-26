@@ -152,6 +152,11 @@ public class ExplicitTravelWorkflowEngine implements WorkflowEngine {
                 NodeExecutionResult result = invocation.get(node.timeout().toMillis(), TimeUnit.MILLISECONDS);
                 long duration = elapsedMillis(started);
                 if ("WAITING_USER".equals(result.getStatus())) {
+                    // WAITING 节点也可能调用模型（例如候选路线动态命名），必须和普通成功节点一样计费并受预算约束。
+                    ensureResultWithinBudget(initialTask.getId(), state, result);
+                    state.merge(result.getData());
+                    state.getMetrics().put(node.nodeId() + ".durationMs", duration);
+                    taskMapper.addUsage(initialTask.getId(), result.getModelCalls(), result.getEstimatedTokens());
                     checkpointStore.waiting(checkpoint, result, state.snapshot(), duration);
                     return result;
                 }

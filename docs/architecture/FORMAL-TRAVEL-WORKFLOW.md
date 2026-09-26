@@ -84,8 +84,8 @@ flowchart TD
 ## 景点路线选择门
 
 - 约束协议将“景点类型偏好”与 `specificAttractions`（用户明确点名的景点）分开，避免把“海边、拍照、亲子”等偏好误判成具体 POI；
-- 只给出城市而未点名景点时，`ROUTE_SELECTION` 根据知识证据和高德 POI 候选生成多条路线卡片，任务进入 `WAITING_USER`；
-- 前端选择路线后把 `selectedRouteId / selectedAttractionIds / selectedAttractionNames` 提交到同一任务的 `/resume`，新补充版本重新检索并把求解候选域收窄到已选路线；
+- 只给出城市而未点名景点时，`ROUTE_SELECTION` 根据知识证据和高德 POI 候选生成多条路线卡片，再由一次受 Sentinel 和执行预算治理的 LLM 调用按真实景点组合批量生成标题；模型失败时由景点名动态兜底，不使用固定路线模板；
+- 前端选择路线后把 `selectedRouteId / selectedAttractionIds / selectedAttractionNames` 提交到同一任务的 `/resume`；约束抽取将完整景点名单写入 `specificAttractions`，新补充版本对每个景点精确检索，并由 Solver 与 Validator 双重保证不能静默遗漏；
 - 用户已点名“灵隐寺、西湖”等具体景点时直接绕过路线选择；具体景点逐一通过 POI 搜索核验，然后继续预算、住宿、餐饮和交通规划；
 - “想去海比较好看的地方”等目的地仍模糊的诉求会先展示代表性滨海目的地路线，选择后再进入 POI 核验，而不是把“好看的地方”当作城市名；
 - 最终生成提示词要求使用带 Emoji 的 Markdown 日程表；前端同时使用 `mapPlan` 渲染景区图片、每日站点表和地图路线，图片只采用工具实际返回的安全 URL。
