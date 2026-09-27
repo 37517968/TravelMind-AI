@@ -2,6 +2,7 @@ package com.travelmind.aiagent.task.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.travelmind.aiagent.task.model.AgentTask;
+import com.travelmind.aiagent.task.dto.AgentTaskStatusView;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -9,6 +10,11 @@ import org.apache.ibatis.annotations.Update;
 import java.util.List;
 
 public interface AgentTaskMapper extends BaseMapper<AgentTask> {
+    @Select("SELECT id AS task_id, status, current_node, model_calls_used, tokens_used, " +
+            "node_executions_used, created_at, started_at, finished_at, updated_at " +
+            "FROM agent_task WHERE id=#{taskId} AND user_id=#{userId} LIMIT 1")
+    AgentTaskStatusView selectStatus(@Param("taskId") Long taskId, @Param("userId") Long userId);
+
     @Select("SELECT * FROM agent_task WHERE request_id = #{requestId} LIMIT 1")
     AgentTask selectByRequestId(@Param("requestId") String requestId);
 

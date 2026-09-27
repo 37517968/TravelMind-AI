@@ -2,6 +2,7 @@ package com.travelmind.aiagent.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmind.aiagent.task.dto.AgentTaskCreateRequest;
+import com.travelmind.aiagent.task.dto.AgentTaskStatusView;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
 import com.travelmind.aiagent.task.mapper.AgentWorkflowCheckpointMapper;
 import com.travelmind.aiagent.task.mapper.OutboxEventMapper;
@@ -37,6 +38,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class AgentTaskServiceTest {
+    @Test
+    void statusShouldUseLightweightOwnedProjection() {
+        AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);
+        AgentTaskStatusView projection = new AgentTaskStatusView();
+        projection.setTaskId(46L);
+        projection.setStatus("SUCCEEDED");
+        when(taskMapper.selectStatus(46L, 7L)).thenReturn(projection);
+        AgentTaskService service = new AgentTaskService(taskMapper, mock(AgentWorkflowCheckpointMapper.class),
+                mock(OutboxEventMapper.class), new ObjectMapper(), new PlatformObservability(),
+                mock(TraceContextCodec.class), mock(AgentConversationMemoryService.class),
+                mock(AgentPlanningDraftService.class), mock(AgentConversationService.class),
+                mock(UserTravelPreferenceService.class));
+
+        assertThat(service.getStatus(46L, 7L)).isSameAs(projection);
+        verify(taskMapper, never()).selectById(anyLong());
+    }
+
     @Test
     void submitShouldPersistTaskAndOutboxInOneServiceTransaction() {
         AgentTaskMapper taskMapper = mock(AgentTaskMapper.class);

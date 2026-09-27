@@ -57,8 +57,12 @@ Docker 可用时 `FlywayMigrationContainerTest` 会自动启动 MySQL 8.0.36；D
 
 Phase 6 黑盒压测、SSE、MQ、Worker 和 RAG 消融工具的参数与安全说明见 [benchmark/README.md](../../benchmark/README.md)。
 
+Agent 指标体系、分层施压顺序、初始 SLO 与正式执行清单见 [Agent 平台压测方案](AGENT-LOAD-TEST-PLAN.md)。
+
 当前报告：
 
+- [2026-09-27 正式环境受控容量探测](CAPACITY-2026-09-27.md)；
+- [2026-09-27 远程 Agent 冒烟报告](SMOKE-2026-09-27.md)；
 - [Phase 6 离线评测报告](PHASE6-OFFLINE-2026-09-21.md)；
 - [Phase 6 故障演练报告](PHASE6-FAILURE-DRILL-REPORT.md)。
 

@@ -4,6 +4,7 @@ import com.travelmind.aiagent.tool.model.ToolPolicy;
 import com.travelmind.aiagent.tool.model.ToolResult;
 import com.travelmind.aiagent.tool.model.ToolExecutionContext;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 平台业务指标和 Trace 入口。指标标签只使用有限枚举；taskId/requestId 仅作为 Trace 高基数字段。
@@ -22,11 +24,15 @@ import java.time.Duration;
 public class PlatformObservability {
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
+    private final AtomicInteger activeSseConnections = new AtomicInteger();
 
     @Autowired
     public PlatformObservability(MeterRegistry meters, ObservationRegistry observations) {
         this.meters = meters;
         this.observations = observations;
+        Gauge.builder("agent.sse.connections.active", activeSseConnections, AtomicInteger::get)
+                .description("Current authenticated Agent SSE connections")
+                .register(meters);
     }
 
     /** 供不启动 Spring 容器的单元测试使用。 */
@@ -150,6 +156,21 @@ public class PlatformObservability {
         Timer.builder("agent.task.end.to.end")
                 .tag("outcome", finite(outcome, "UNKNOWN"))
                 .register(meters).record(duration.isNegative() ? Duration.ZERO : duration);
+    }
+
+    public void sseConnected() {
+        activeSseConnections.incrementAndGet();
+        Counter.builder("agent.sse.connections").tag("event", "OPENED").register(meters).increment();
+    }
+
+    public void sseDisconnected() {
+        activeSseConnections.updateAndGet(current -> Math.max(0, current - 1));
+        Counter.builder("agent.sse.connections").tag("event", "CLOSED").register(meters).increment();
+    }
+
+    public void sseEvent(String type) {
+        Counter.builder("agent.sse.events").tag("type", finite(type, "UNKNOWN"))
+                .register(meters).increment();
     }
 
     private String finite(String value, String fallback) {

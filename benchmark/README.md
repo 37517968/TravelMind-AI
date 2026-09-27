@@ -13,9 +13,26 @@
 
 脚本只依赖 Python 3 标准库：
 
+Agent 场景需要先登录并创建归属当前用户的独立会话。推荐创建专用压测账号，并只在当前终端设置凭证：
+
+```powershell
+$env:AGENT_BASE_URL = 'http://localhost:8123/api'
+$env:AGENT_USERNAME = 'loadtest'
+$env:AGENT_PASSWORD = '仅在当前终端设置'
+$env:PROMETHEUS_URL = 'http://localhost:9091'
+```
+
+也可使用 `AGENT_SESSION_COOKIE` 传入已有 `SESSION` Cookie。报告不会写入密码、Cookie 或认证头。
+
 ```powershell
 # 任务提交接口
 python benchmark/load/phase6_load.py --scenario api --requests 500 --concurrency 32 --confirm-agent-tasks
+
+# 轻量任务状态查询 QPS（需要已归属当前用户的 taskId）
+python benchmark/load/phase6_load.py --scenario query --task-id 46 --requests 500 --concurrency 16
+
+# 同一 Idempotency-Key 重放，只创建一个真实任务，用于测接入层和幂等能力
+python benchmark/load/phase6_load.py --scenario idempotency --requests 200 --concurrency 16 --confirm-agent-tasks
 
 # RAG 查询，不会创建 Agent 任务
 python benchmark/load/phase6_load.py --scenario rag --requests 1000 --concurrency 32
@@ -34,7 +51,11 @@ python benchmark/load/phase6_load.py --scenario worker --requests 30 --concurren
   --worker-timeout 600 --confirm-agent-tasks
 ```
 
-`api` 场景只测任务接收延迟，但任务仍会异步消费模型额度。`worker` 场景测量端到端完成时间。`mq` 场景通过业务 API 和 Outbox 产生合法消息，不直接向队列塞入伪造 Payload。
+`api` 场景只测任务接收延迟，但任务仍会异步消费模型额度。`worker` 场景测量端到端完成时间。`sse` 同时记录首事件、首 Token、完整流和重连。`mq` 场景通过业务 API 和 Outbox 产生合法消息，不直接向队列塞入伪造 Payload。脚本会为每个任务创建独立会话，避免并发样本互相污染上下文。
+
+默认初始门槛为成功率 99%、提交 P95 1 秒、SSE 首事件 P95 2 秒、首 Token P95 30 秒、E2E P95 300 秒；可通过 `--min-success-rate`、`--max-*-p95-ms` 覆盖。退出码 `3` 表示 SLO 未通过，`2` 表示存在请求失败。
+
+完整指标口径、分层场景和正式压测前提见 [Agent 平台压测方案](../docs/benchmark/AGENT-LOAD-TEST-PLAN.md)。
 
 ## RAG 消融
 

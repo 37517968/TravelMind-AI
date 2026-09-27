@@ -3,6 +3,7 @@ package com.travelmind.aiagent.task.controller;
 import com.travelmind.aiagent.task.dto.AgentTaskCreateRequest;
 import com.travelmind.aiagent.task.dto.AgentTaskResumeRequest;
 import com.travelmind.aiagent.task.dto.AgentTaskView;
+import com.travelmind.aiagent.task.dto.AgentTaskStatusView;
 import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.service.AgentTaskService;
 import com.travelmind.aiagent.task.service.AgentConversationMemoryService;
@@ -47,6 +48,12 @@ public class AgentTaskController {
     @Operation(summary = "查询任务、结果及节点检查点")
     public AgentTaskView get(@PathVariable Long taskId, HttpServletRequest request) {
         return taskService.get(taskId, userService.getLoginUser(request).getId());
+    }
+
+    @GetMapping("/{taskId}/status")
+    @Operation(summary = "轻量查询任务状态（不加载结果和检查点）")
+    public AgentTaskStatusView status(@PathVariable Long taskId, HttpServletRequest request) {
+        return taskService.getStatus(taskId, userService.getLoginUser(request).getId());
     }
 
     @PostMapping("/{taskId}/pause")

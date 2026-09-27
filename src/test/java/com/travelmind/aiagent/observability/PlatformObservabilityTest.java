@@ -26,6 +26,9 @@ class PlatformObservabilityTest {
         observability.completeNode(observability.startTimer(), "ITINERARY_GENERATION", "SUCCEEDED");
         observability.completeRag(observability.startTimer(), false, true, false);
         observability.recordModelFirstToken(Duration.ofMillis(120).toNanos());
+        observability.sseConnected();
+        observability.sseEvent("token");
+        observability.sseDisconnected();
         observability.recordTool(new ToolPolicy("weather", "LOCAL", ToolRiskLevel.READ_ONLY,
                         true, true, Duration.ofMinutes(5), Duration.ofSeconds(3), 2, 4096,
                         Set.of("TOOL_EXECUTION"), 0.02),
@@ -38,6 +41,9 @@ class PlatformObservabilityTest {
                 .isEqualTo(1);
         assertThat(meters.get("rag.search").tag("degraded", "true").counter().count()).isEqualTo(1);
         assertThat(meters.get("agent.model.first.token.duration").timer().count()).isEqualTo(1);
+        assertThat(meters.get("agent.sse.connections.active").gauge().value()).isZero();
+        assertThat(meters.get("agent.sse.connections").tag("event", "OPENED").counter().count()).isEqualTo(1);
+        assertThat(meters.get("agent.sse.events").tag("type", "token").counter().count()).isEqualTo(1);
         assertThat(meters.get("tool.calls").tag("tool", "weather").tag("outcome", "SUCCESS").counter().count())
                 .isEqualTo(1);
         assertThat(meters.get("tool.estimated.cost").tag("tool", "weather").counter().count()).isEqualTo(0.02);

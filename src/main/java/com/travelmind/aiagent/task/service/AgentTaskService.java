@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.travelmind.aiagent.task.dto.AgentTaskCreateRequest;
 import com.travelmind.aiagent.task.dto.AgentTaskView;
+import com.travelmind.aiagent.task.dto.AgentTaskStatusView;
 import com.travelmind.aiagent.task.mapper.AgentTaskMapper;
 import com.travelmind.aiagent.task.mapper.AgentWorkflowCheckpointMapper;
 import com.travelmind.aiagent.task.mapper.OutboxEventMapper;
@@ -108,6 +109,15 @@ public class AgentTaskService {
                 .task(task)
                 .checkpoints(checkpointMapper.selectByTaskId(taskId))
                 .build();
+    }
+
+    public AgentTaskStatusView getStatus(Long taskId, Long userId) {
+        AgentTaskStatusView status = taskMapper.selectStatus(taskId, userId);
+        if (status == null) {
+            throw new com.travelmind.aiagent.exception.BusinessException(
+                    com.travelmind.aiagent.common.ErrorCode.NO_AUTH_ERROR, "任务不存在或不属于当前用户");
+        }
+        return status;
     }
 
     @Transactional

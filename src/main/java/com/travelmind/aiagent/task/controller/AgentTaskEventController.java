@@ -3,6 +3,7 @@ package com.travelmind.aiagent.task.controller;
 import com.travelmind.aiagent.task.event.AgentProgressEventStore;
 import com.travelmind.aiagent.task.model.AgentTask;
 import com.travelmind.aiagent.task.service.AgentTaskService;
+import com.travelmind.aiagent.observability.PlatformObservability;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,7 @@ public class AgentTaskEventController {
     private final AgentTaskService taskService;
     private final ExecutorService agentNodeInvocationExecutor;
     private final UserService userService;
+    private final PlatformObservability observability;
 
     @Value("${agent.task.sse-timeout-ms:180000}")
     private long timeoutMs;
@@ -41,7 +43,19 @@ public class AgentTaskEventController {
                              HttpServletRequest request) {
         taskService.requireOwnedTask(taskId, userService.getLoginUser(request).getId());
         SseEmitter emitter = new SseEmitter(timeoutMs);
-        agentNodeInvocationExecutor.execute(() -> stream(taskId, lastEventId, emitter));
+        observability.sseConnected();
+        try {
+            agentNodeInvocationExecutor.execute(() -> {
+                try {
+                    stream(taskId, lastEventId, emitter);
+                } finally {
+                    observability.sseDisconnected();
+                }
+            });
+        } catch (RuntimeException rejected) {
+            observability.sseDisconnected();
+            throw rejected;
+        }
         return emitter;
     }
 
@@ -59,12 +73,14 @@ public class AgentTaskEventController {
                         Object payload = record.getValue().get("payload");
                         String type = String.valueOf(record.getValue().getOrDefault("type", "PROGRESS"));
                         String eventName = "TOKEN".equals(type) ? "token" : "progress";
+                        observability.sseEvent(eventName);
                         emitter.send(SseEmitter.event().id(cursor).name(eventName)
                                 .data(payload == null ? "{}" : payload));
                     }
                 }
                 AgentTask task = taskService.requireTask(taskId);
                 if (TERMINAL.contains(task.getStatus())) {
+                    observability.sseEvent("terminal");
                     emitter.send(SseEmitter.event().name("terminal").data(task.getStatus()));
                     emitter.complete();
                     return;
