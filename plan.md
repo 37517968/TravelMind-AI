@@ -1145,7 +1145,7 @@ Spring AI 已提供 ChatClient、Advisor、ChatModel、EmbeddingModel、VectorSt
 - Tool 超时必须在配置时间内结束，不能无限等待；
 - RAG 混合召回指标高于纯 BM25 和纯向量基线；
 - 上下文压缩后硬约束保持率：100%；
-- 所有简历性能数字都能在 `docs/benchmark/` 找到复现脚本和报告。
+- 所有简历性能数字都能在 `docs/05-PERFORMANCE-AND-EVALUATION.md` 找到口径、复现脚本和报告。
 
 ### 18.4 验收产物
 
