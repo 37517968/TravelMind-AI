@@ -42,3 +42,7 @@ node_modules/
 dist/
 .npm-cache/
 .m2/
+
+### Local project notes ###
+docs/
+plan.md

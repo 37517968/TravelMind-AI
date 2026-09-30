@@ -1,6 +1,6 @@
 # TravelMind 压测与评测工具
 
-所有脚本默认把原始 JSON 和 Markdown 报告写入 `target/phase6-reports/`。该目录是构建产物，不应提交；需要归档的真实结果经过人工核对后写入 `docs/05-PERFORMANCE-AND-EVALUATION.md`。
+所有脚本默认把原始 JSON 和 Markdown 报告写入 `target/phase6-reports/`。该目录是本地构建产物，不应提交；需要长期归档的结果应进入团队内部的性能报告系统。
 
 ## 安全前提
 
@@ -55,7 +55,7 @@ python benchmark/load/phase6_load.py --scenario worker --requests 30 --concurren
 
 默认初始门槛为成功率 99%、提交 P95 1 秒、SSE 首事件 P95 2 秒、首 Token P95 30 秒、E2E P95 300 秒；可通过 `--min-success-rate`、`--max-*-p95-ms` 覆盖。退出码 `3` 表示 SLO 未通过，`2` 表示存在请求失败。
 
-完整指标口径、分层场景、真实结果与报告规则见 [压测与评测](../docs/05-PERFORMANCE-AND-EVALUATION.md)。
+执行正式测试时，应同时记录提交版本、服务器规格、模型版本、Worker 数量、数据规模、并发、预热方式、成功率、吞吐、分位延迟、队列积压与资源峰值，确保结果可复现。
 
 ## RAG 消融
 
